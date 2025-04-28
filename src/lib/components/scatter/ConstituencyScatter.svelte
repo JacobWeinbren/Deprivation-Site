@@ -122,14 +122,10 @@
 			p.label === highlightedConstituency ? 1.5 : 0
 		);
 		// Avoid calling update if the chart is currently animating or updating
-		if (
-			!chart.isDatasetVisible(0) ||
-			chart.options?.animation === false ||
-			chart.options?.animation?.duration === 0
-		) {
-			chart.update("none"); // Use 'none' mode for performance if possible
-		} else {
-			chart.update("none"); // Stick with 'none' for now
+		try {
+			chart.update("none");
+		} catch (e) {
+			console.error("Error updating chart highlight:", e);
 		}
 	}
 
