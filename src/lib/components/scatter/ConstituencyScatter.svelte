@@ -3,7 +3,6 @@
 <!-- Ambient module declaration MUST be at the top level -->
 <script lang="ts">
 	// Type definitions for Chart.js and its plugins
-	// We augment the global Window interface
 	declare global {
 		interface Window {
 			Chart: ChartType;
@@ -24,14 +23,24 @@
 		options: any;
 	}
 
+	// Structure for responsive font sizes
+	interface ResponsiveFontSizes {
+		titleSize: number;
+		axisTitleSize: number;
+		tickSize: number;
+		annotationSize: number;
+		tooltipTitleSize: number;
+		tooltipBodySize: number;
+	}
+
 	import { onMount, onDestroy, createEventDispatcher } from "svelte";
 	import {
 		parties,
 		metrics,
 		partyColors,
 		type ConstituencyData,
-	} from "./chartConfig"; // Assuming these are correctly defined elsewhere
-	import { getNumericValue, debounce } from "./utils"; // Assuming these are correctly defined elsewhere
+	} from "./chartConfig";
+	import { getNumericValue, debounce } from "./utils";
 
 	// Props
 	export let data: ConstituencyData[] = [];
@@ -39,7 +48,6 @@
 	export let preselectedMetric: string = "overall_local_score";
 	export let title: string = "";
 	export let compact: boolean = false;
-	/** Optional unique ID for elements if multiple charts are on one page */
 	export let id: string = Math.random().toString(36).substring(2, 9);
 
 	// State
@@ -54,35 +62,45 @@
 	let statsText: string = "";
 	let isMounted: boolean = false;
 	let chart: ChartInstance | null = null;
-	let ss: any = null; // Simple Statistics library
+	let ss: any = null;
 	let resizeObserver: ResizeObserver | null = null;
 	let highlightedConstituency: string | null = null;
 	let searchTerm: string = "";
 	let searchResults: string[] = [];
-
-	// Store plot points calculated during the last full update
-	// Needed for applyHighlight to work without recalculating everything
 	let currentPlotPoints: {
 		x: number;
 		y: number;
 		label: string;
 		id: string;
 	}[] = [];
-	// Cache tooltip labels for faster lookup
 	let currentTooltipLabels: string[] = [];
 
 	const dispatch = createEventDispatcher();
 
-	// Setup option groups for metric select dropdown
+	// --- Responsive Settings ---
+	const smallBreakpoint = 640; // px width threshold for smaller text
+
+	// --- Helper Function to Calculate Font Sizes ---
+	function getResponsiveFontSizes(width: number): ResponsiveFontSizes {
+		const isSmall = width < smallBreakpoint;
+		return {
+			titleSize: isSmall ? 14 : 16,
+			axisTitleSize: isSmall ? 11 : 13,
+			tickSize: isSmall ? 9 : 11,
+			annotationSize: isSmall ? 9 : 11,
+			tooltipTitleSize: isSmall ? 11 : 13,
+			tooltipBodySize: isSmall ? 10 : 12,
+		};
+	}
+
+	// Setup option groups
 	let orderedGroupedMetrics: {
 		groupName: string;
 		options: { value: string; label: string }[];
 	}[] = [];
-
 	$: {
 		const groupMap = new Map<string, { value: string; label: string }[]>();
 		const groupOrder: string[] = [];
-
 		metrics.forEach((metric) => {
 			const group = metric.group || "Other";
 			if (!groupMap.has(group)) {
@@ -93,18 +111,16 @@
 				.get(group)
 				?.push({ value: metric.value, label: metric.label });
 		});
-
 		orderedGroupedMetrics = groupOrder.map((groupName) => ({
 			groupName,
 			options: groupMap.get(groupName) || [],
 		}));
 	}
 
-	// Search functionality - reactive statement
+	// Search functionality
 	$: {
 		if (searchTerm.length > 1) {
 			const term = searchTerm.toLowerCase();
-			// Use currentPlotPoints if available for faster filtering, otherwise fallback to data
 			const sourceData =
 				currentPlotPoints.length > 0 ? currentPlotPoints : data;
 			searchResults = sourceData
@@ -113,82 +129,62 @@
 						?.toLowerCase()
 						.includes(term)
 				)
-				.slice(0, 5) // Limit results
+				.slice(0, 5)
 				.map((d) => d.label || d.constituency_name);
 		} else {
 			searchResults = [];
 		}
 	}
 
-	// --- NEW: Function to apply highlight styles without full redraw ---
+	// Apply highlight styles without full redraw
 	function applyHighlight() {
-		if (!chart || !chart.data.datasets || !chart.data.datasets[0]) {
-			// Chart not ready or dataset missing
-			return;
-		}
-
-		// Ensure we have the points data from the last full update
-		if (!currentPlotPoints || currentPlotPoints.length === 0) {
-			console.warn(
-				"applyHighlight called before plot points were calculated."
-			);
-			return;
-		}
+		if (!chart || !chart.data.datasets || !chart.data.datasets[0]) return;
+		if (!currentPlotPoints || currentPlotPoints.length === 0) return;
 
 		const dataset = chart.data.datasets[0];
 		const defaultPointSize = 3;
 		const highlightedPointSize = 6;
 
-		// Calculate new style arrays based on the current highlightedConstituency
-		const newPointSizes = currentPlotPoints.map((p) =>
+		dataset.pointRadius = currentPlotPoints.map((p) =>
 			p.label === highlightedConstituency
 				? highlightedPointSize
 				: defaultPointSize
 		);
-		const newPointBorderColors = currentPlotPoints.map((p) =>
+		dataset.borderColor = currentPlotPoints.map((p) =>
 			p.label === highlightedConstituency ? "#000000" : "transparent"
 		);
-		const newPointBorderWidths = currentPlotPoints.map((p) =>
+		dataset.borderWidth = currentPlotPoints.map((p) =>
 			p.label === highlightedConstituency ? 1.5 : 0
 		);
-
-		// Update the chart dataset properties directly
-		dataset.pointRadius = newPointSizes;
-		dataset.borderColor = newPointBorderColors;
-		dataset.borderWidth = newPointBorderWidths;
-
-		// Update the chart visually without animation or full recalculation
-		// 'none' prevents animation, making it instant
 		chart.update("none");
 	}
 
-	// --- MODIFIED: selectConstituency calls applyHighlight ---
+	// Select constituency and highlight
 	function selectConstituency(name: string) {
 		if (highlightedConstituency !== name) {
 			highlightedConstituency = name;
-			searchTerm = ""; // Clear search after selection
+			searchTerm = "";
 			searchResults = [];
-			applyHighlight(); // <<<--- CALL applyHighlight INSTEAD of updateChart
-			dispatch("constituencyClick", { name: name }); // Dispatch event
+			applyHighlight();
+			dispatch("constituencyClick", { name: name });
 		} else {
-			// If clicking the already selected one, just clear search
 			searchTerm = "";
 			searchResults = [];
 		}
 	}
 
-	// --- MODIFIED: resetView calls applyHighlight ---
+	// Reset highlight and search
 	function resetView() {
 		if (highlightedConstituency !== null || searchTerm !== "") {
 			highlightedConstituency = null;
 			searchTerm = "";
 			searchResults = [];
-			applyHighlight(); // <<<--- CALL applyHighlight INSTEAD of updateChart
+			applyHighlight();
 		}
 	}
 
+	// Load Chart.js and plugins dynamically
 	async function loadChartLibraries() {
-		// Dynamically load Chart.js and required plugins only when needed
 		if (!window.Chart) {
 			try {
 				const [
@@ -200,7 +196,6 @@
 					import("chartjs-plugin-trendline"),
 					import("chartjs-plugin-annotation"),
 				]);
-
 				const {
 					Chart,
 					LinearScale,
@@ -212,7 +207,6 @@
 					ScatterController,
 					LineController,
 				} = chartModule;
-
 				Chart.register(
 					LinearScale,
 					PointElement,
@@ -225,7 +219,6 @@
 					chartTrendlineModule.default,
 					chartAnnotationModule.default
 				);
-
 				window.Chart = Chart;
 			} catch (e) {
 				console.error("Failed to load Chart.js or plugins:", e);
@@ -243,7 +236,8 @@
 			!canvas ||
 			!placeholderElement ||
 			!statsElement ||
-			!ss
+			!ss ||
+			!chartContainer // Ensure container exists
 		) {
 			isLoading = false;
 			return;
@@ -269,6 +263,11 @@
 		try {
 			await loadChartLibraries();
 
+			// --- Get current width and calculate font sizes ---
+			const containerWidth = chartContainer.clientWidth;
+			const fontSizes = getResponsiveFontSizes(containerWidth);
+			// ---
+
 			const currentParty = selectedParty;
 			const currentMetric = selectedMetric;
 			const selectedPartyLabel =
@@ -287,7 +286,6 @@
 				id: string;
 			}[] = [];
 			const statPoints: [number, number][] = [];
-
 			for (const row of data) {
 				const xVal = getNumericValue(row, currentMetric);
 				const yVal = getNumericValue(row, currentParty);
@@ -297,7 +295,6 @@
 						row.ons_id ||
 						`${name}-${xVal}-${yVal}`
 				);
-
 				if (
 					xVal !== null &&
 					yVal !== null &&
@@ -311,11 +308,8 @@
 					statPoints.push([xVal, yVal]);
 				}
 			}
-
-			// --- MODIFIED: Store calculated points globally ---
 			currentPlotPoints = [...plotPoints];
-			currentTooltipLabels = currentPlotPoints.map((p) => p.label); // Update tooltip labels cache
-			// ---
+			currentTooltipLabels = currentPlotPoints.map((p) => p.label);
 
 			if (statPoints.length < 3) {
 				throw new Error(
@@ -328,15 +322,12 @@
 			let pearsonR: number = NaN;
 			let rSquared: number = NaN;
 			const n = statPoints.length;
-
 			const xValues = statPoints.map((p) => p[0]);
 			const yValues = statPoints.map((p) => p[1]);
-
 			const regression = ss.linearRegression(statPoints);
 			const regressionFunction = ss.linearRegressionLine(regression);
 			pearsonR = ss.sampleCorrelation(xValues, yValues);
 			rSquared = pearsonR * pearsonR;
-
 			const xMin = ss.min(xValues);
 			const xMax = ss.max(xValues);
 			const numPoints = 50;
@@ -353,13 +344,13 @@
 				y: regressionPoints.map((p) => p.y),
 			};
 
-			// Destroy previous chart instance
+			// Destroy previous chart
 			if (chart) {
 				chart.destroy();
 				chart = null;
 			}
 
-			// Configure point appearance (uses highlightedConstituency for initial state)
+			// Configure point appearance
 			const defaultPointSize = 3;
 			const highlightedPointSize = 6;
 			const pointSizes = currentPlotPoints.map((p) =>
@@ -377,11 +368,11 @@
 			const datasets: any[] = [
 				{
 					label: "Constituencies",
-					data: currentPlotPoints.map((p) => ({ x: p.x, y: p.y })), // Use cached points
+					data: currentPlotPoints.map((p) => ({ x: p.x, y: p.y })),
 					backgroundColor: color,
-					borderColor: pointBorderColors, // Use calculated borders
-					borderWidth: pointBorderWidths, // Use calculated widths
-					pointRadius: pointSizes, // Use calculated sizes
+					borderColor: pointBorderColors,
+					borderWidth: pointBorderWidths,
+					pointRadius: pointSizes,
 					pointHoverRadius: 8,
 					pointHitRadius: 6,
 					pointHoverBorderWidth: 2,
@@ -389,7 +380,6 @@
 					pointHoverBorderColor: "#000000",
 				},
 			];
-
 			if (regressionLine) {
 				datasets.push({
 					type: "line",
@@ -409,12 +399,10 @@
 
 			const chartTitleText =
 				title || `${selectedPartyLabel} vs ${selectedMetricLabel}`;
-
 			const ctx = canvas.getContext("2d");
-			if (!ctx) {
-				throw new Error("Could not get canvas context.");
-			}
+			if (!ctx) throw new Error("Could not get canvas context.");
 
+			// --- Create Chart with Responsive Font Sizes ---
 			chart = new window.Chart(ctx, {
 				type: "scatter",
 				data: { datasets },
@@ -422,9 +410,7 @@
 					responsive: true,
 					maintainAspectRatio: true,
 					aspectRatio: 1.6,
-					animation: {
-						duration: 400,
-					},
+					animation: { duration: 400 },
 					interaction: {
 						mode: "nearest",
 						intersect: true,
@@ -441,14 +427,16 @@
 							borderWidth: 1,
 							padding: 10,
 							displayColors: false,
-							titleFont: { weight: "bold", size: 13 },
-							bodyFont: { size: 12 },
+							// Use responsive sizes
+							titleFont: {
+								weight: "bold",
+								size: fontSizes.tooltipTitleSize,
+							},
+							bodyFont: { size: fontSizes.tooltipBodySize },
 							callbacks: {
-								// CORRECTED: Use array for multi-line tooltips
 								label: function (context: any) {
 									const index = context.dataIndex;
 									const datasetIndex = context.datasetIndex;
-									// Use cached labels
 									if (
 										datasetIndex === 0 &&
 										currentTooltipLabels[index]
@@ -480,7 +468,8 @@
 							text: chartTitleText,
 							padding: { top: 10, bottom: 20 },
 							font: {
-								size: 16,
+								// Use responsive size
+								size: fontSizes.titleSize,
 								weight: "bold",
 								family: "'Inter', sans-serif",
 							},
@@ -495,7 +484,8 @@
 								display: true,
 								text: selectedMetricLabel,
 								font: {
-									size: 13,
+									// Use responsive size
+									size: fontSizes.axisTitleSize,
 									family: "'Inter', sans-serif",
 								},
 								color: "#555555",
@@ -505,7 +495,8 @@
 							border: { color: "#dddddd" },
 							ticks: {
 								color: "#666666",
-								font: { size: 11 },
+								// Use responsive size
+								font: { size: fontSizes.tickSize },
 								callback: function (value: any) {
 									const numValue = Number(value);
 									if (isNaN(numValue)) return value;
@@ -531,7 +522,8 @@
 								display: true,
 								text: selectedPartyLabel,
 								font: {
-									size: 13,
+									// Use responsive size
+									size: fontSizes.axisTitleSize,
 									family: "'Inter', sans-serif",
 								},
 								color: "#555555",
@@ -541,7 +533,8 @@
 							border: { color: "#dddddd" },
 							ticks: {
 								color: "#666666",
-								font: { size: 11 },
+								// Use responsive size
+								font: { size: fontSizes.tickSize },
 								callback: function (value: any) {
 									return value + "%";
 								},
@@ -556,12 +549,9 @@
 							if (
 								index !== undefined &&
 								index >= 0 &&
-								index < currentTooltipLabels.length // Use cached labels length
+								index < currentTooltipLabels.length
 							) {
-								const constituencyName =
-									currentTooltipLabels[index];
-								// Call selectConstituency which now handles highlight efficiently
-								selectConstituency(constituencyName);
+								selectConstituency(currentTooltipLabels[index]);
 							}
 						}
 					},
@@ -586,7 +576,7 @@
 			placeholderElement.style.display = "flex";
 			canvas.style.display = "none";
 			statsText = "";
-			currentPlotPoints = []; // Clear cached points on error
+			currentPlotPoints = [];
 			currentTooltipLabels = [];
 			if (chart) {
 				chart.destroy();
@@ -597,18 +587,58 @@
 		}
 	}
 
+	// --- MODIFIED: Resize handler updates font sizes ---
+	const handleResize = debounce(() => {
+		if (!chart || !chartContainer || !isMounted) return;
+
+		// 1. Let Chart.js handle canvas resizing first
+		chart.resize();
+
+		// 2. Get new font sizes based on the potentially new container width
+		const newWidth = chartContainer.clientWidth;
+		const newFontSizes = getResponsiveFontSizes(newWidth);
+
+		// 3. Update the font sizes in the chart's options object
+		// Note: Need to check if options and nested properties exist
+		if (chart.options?.plugins?.title?.font) {
+			chart.options.plugins.title.font.size = newFontSizes.titleSize;
+		}
+		if (chart.options?.scales?.x?.title?.font) {
+			chart.options.scales.x.title.font.size = newFontSizes.axisTitleSize;
+		}
+		if (chart.options?.scales?.y?.title?.font) {
+			chart.options.scales.y.title.font.size = newFontSizes.axisTitleSize;
+		}
+		if (chart.options?.scales?.x?.ticks?.font) {
+			chart.options.scales.x.ticks.font.size = newFontSizes.tickSize;
+		}
+		if (chart.options?.scales?.y?.ticks?.font) {
+			chart.options.scales.y.ticks.font.size = newFontSizes.tickSize;
+		}
+		if (
+			chart.options?.plugins?.annotation?.annotations?.correlationText
+				?.font
+		) {
+			chart.options.plugins.annotation.annotations.correlationText.font.size =
+				newFontSizes.annotationSize;
+		}
+		if (chart.options?.plugins?.tooltip?.titleFont) {
+			chart.options.plugins.tooltip.titleFont.size =
+				newFontSizes.tooltipTitleSize;
+		}
+		if (chart.options?.plugins?.tooltip?.bodyFont) {
+			chart.options.plugins.tooltip.bodyFont.size =
+				newFontSizes.tooltipBodySize;
+		}
+
+		// 4. Apply the option changes visually
+		chart.update("none"); // 'none' prevents re-animation
+	}, 150); // Debounce resize events
+
 	onMount(async () => {
 		isLoading = true;
 		errorMessage = null;
-		placeholderElement.innerHTML = `
-      <div class="flex flex-col items-center justify-center text-center">
-        <div class="animate-pulse flex space-x-2 mb-2">
-          <div class="h-2 w-2 bg-gray-400 rounded-full"></div>
-          <div class="h-2 w-2 bg-gray-400 rounded-full"></div>
-          <div class="h-2 w-2 bg-gray-400 rounded-full"></div>
-        </div>
-        <p class="text-gray-600 text-sm">Loading visualization...</p>
-      </div>`;
+		placeholderElement.innerHTML = `... Loading ...`; // Simplified placeholder
 		placeholderElement.style.display = "flex";
 		canvas.style.display = "none";
 
@@ -619,15 +649,10 @@
 			}
 
 			isMounted = true;
-			await updateChart(); // Initial full draw
+			await updateChart(); // Initial full draw (calculates initial font sizes)
 
-			const debouncedResize = debounce(() => {
-				if (chart && isMounted) {
-					chart.resize();
-				}
-			}, 150);
-
-			resizeObserver = new ResizeObserver(debouncedResize);
+			// Setup ResizeObserver with the modified handler
+			resizeObserver = new ResizeObserver(handleResize);
 			if (chartContainer) {
 				resizeObserver.observe(chartContainer);
 			}
@@ -648,19 +673,18 @@
 			chart.destroy();
 		}
 		isMounted = false;
-		currentPlotPoints = []; // Clear cache on destroy
+		currentPlotPoints = [];
 		currentTooltipLabels = [];
 	});
 
-	// --- Reactive updates for Party/Metric still trigger full redraw ---
+	// Reactive updates for Party/Metric still trigger full redraw
 	$: if (isMounted && (selectedParty || selectedMetric)) {
-		// Debounce updates triggered by prop changes
 		const debouncedUpdate = debounce(updateChart, 100);
 		debouncedUpdate();
 	}
 </script>
 
-<!-- HTML Template -->
+<!-- HTML Template (No changes needed here from previous version) -->
 <div
 	class="font-sans bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden {compact
 		? 'p-3'
@@ -774,7 +798,6 @@
 					<div
 						class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"
 					>
-						<!-- Heroicon: Search -->
 						<svg
 							class="w-4 h-4 text-gray-400"
 							fill="currentColor"
@@ -788,7 +811,6 @@
 						</svg>
 					</div>
 				</div>
-				<!-- Search Results Dropdown -->
 				{#if searchTerm && searchResults.length > 0}
 					<div
 						class="absolute z-20 mt-1 w-full bg-white shadow-lg rounded-md border border-gray-200 max-h-60 overflow-auto py-1"
@@ -824,7 +846,6 @@
 				class="flex items-center py-1 px-2 text-xs text-gray-600 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition duration-150 ease-in-out"
 				aria-label="Reset chart view and clear selection"
 			>
-				<!-- Heroicon: Refresh -->
 				<svg
 					class="w-3.5 h-3.5 mr-1"
 					fill="none"
@@ -850,9 +871,7 @@
 		class="relative w-full mx-auto bg-gray-50 rounded border border-gray-100 overflow-hidden shadow-inner"
 		style="max-width: 800px;"
 	>
-		<!-- Canvas element for Chart.js -->
 		<canvas bind:this={canvas} style="display: none;"></canvas>
-		<!-- Placeholder for Loading/Error State -->
 		<div
 			bind:this={placeholderElement}
 			class="absolute inset-0 flex items-center justify-center text-center p-4 bg-white/90 z-10"
@@ -860,7 +879,7 @@
 			class:text-red-600={errorMessage}
 			aria-live="polite"
 		>
-			<!-- Content is set dynamically in JS -->
+			<!-- Content set in JS -->
 		</div>
 	</div>
 
