@@ -283,7 +283,7 @@
 		};
 	}
 
-	// --- Core Plotting Logic (largely unchanged, check formatting if needed) ---
+	// --- Core Plotting Logic ---
 	async function updateChart() {
 		if (
 			!isMounted ||
@@ -317,7 +317,6 @@
 		const selectedPartyLabel =
 			parties.find((p) => p.value === currentParty)?.label ||
 			currentParty;
-		// Find the metric label from the potentially nested structure
 		const selectedMetricLabel =
 			metrics.find((m) => m.value === currentMetric)?.label ||
 			currentMetric;
@@ -331,14 +330,23 @@
 			const yVal = getNumericValue(row, currentParty);
 			const name = row.constituency_name;
 
-			if (xVal !== null && yVal !== null && yVal > 0 && name) {
+			// *** MODIFICATION: Filter out points where EITHER x OR y is 0 ***
+			if (
+				xVal !== null &&
+				yVal !== null &&
+				xVal > 0 && // Check if x-value is greater than 0
+				yVal > 0 && // Check if y-value is greater than 0
+				name
+			) {
 				plotPoints.push({ x: xVal, y: yVal, text: name });
 				statPoints.push([xVal, yVal]);
 			} else if (xVal !== null && yVal !== null && yVal < 0 && name) {
+				// Keep warning for negative y-values (likely data errors)
 				console.warn(
 					`Warning: Negative voteshare (${yVal}%) found for ${name}. Excluding from plot.`
 				);
 			}
+			// Constituencies with xVal === 0 OR yVal === 0 are now implicitly excluded
 		}
 
 		try {
@@ -347,8 +355,9 @@
 			/* ignore purge errors */
 		}
 
+		// *** MODIFICATION: Update error message text ***
 		if (statPoints.length < 2) {
-			errorMessage = `Not enough valid data points (${statPoints.length}) with >0% voteshare for the selected party to calculate correlation/regression. Try different variables.`;
+			errorMessage = `Not enough valid data points (${statPoints.length}) with >0% voteshare AND >0 metric value to calculate correlation/regression. Try different variables.`;
 			statsText = "";
 			placeholderElement.textContent = errorMessage;
 			isLoading = false;
@@ -378,18 +387,29 @@
 			const xMin = ss.min(xValues);
 			const xMax = ss.max(xValues);
 			const xRange = xMax - xMin;
+			// Extend slightly beyond the min/max *of the filtered data*
 			const extendedXMin = xMin - xRange * 0.02;
 			const extendedXMax = xMax + xRange * 0.02;
 
 			let yMinCalc = regressionFunction(extendedXMin);
 			let yMaxCalc = regressionFunction(extendedXMax);
 
+			// Clamp regression line start/end points at y=0 if they go below
 			const clampedYMin = Math.max(0, yMinCalc);
 			const clampedYMax = Math.max(0, yMaxCalc);
 
+			// Also clamp regression line start/end points at x=0 if they go below
+			// (This is less likely given we filter x>0, but good practice)
+			const finalXMin = Math.max(0, extendedXMin);
+			const finalXMax = extendedXMax; // Max doesn't need clamping usually
+
+			// Recalculate Y based on potentially clamped X
+			const finalYMin = Math.max(0, regressionFunction(finalXMin));
+			const finalYMax = Math.max(0, regressionFunction(finalXMax));
+
 			regressionLine = {
-				x: [extendedXMin, extendedXMax],
-				y: [clampedYMin, clampedYMax],
+				x: [finalXMin, finalXMax],
+				y: [finalYMin, finalYMax],
 			};
 		} catch (e: any) {
 			console.error("Stat calculation error:", e);
@@ -485,8 +505,8 @@
 				},
 				automargin: true,
 				gridcolor: "#e5e7eb",
-				zeroline: false,
-				rangemode: "tozero",
+				zeroline: false, // Keep false as we start > 0
+				rangemode: "tozero", // Still useful to ensure range includes values near zero if data is clustered there
 				tickfont: { size: 11, color: "#6b7280" },
 				tickformat: xAxisTickFormat, // Use dynamic format
 				showline: true,
@@ -501,7 +521,7 @@
 				},
 				automargin: true,
 				gridcolor: "#e5e7eb",
-				zeroline: true,
+				zeroline: true, // Keep true for Y axis (voteshare)
 				zerolinecolor: "#d1d5db",
 				zerolinewidth: 1,
 				ticksuffix: "%",
@@ -555,7 +575,8 @@
 			});
 			placeholderElement.style.display = "none";
 			chartElement.style.visibility = "visible";
-			statsText = `Pearson Correlation (r): <b class="font-semibold text-gray-800">${pearsonR.toFixed(3)}</b> &nbsp;|&nbsp; R-squared (R²): <b class="font-semibold text-gray-800">${rSquared.toFixed(3)}</b> &nbsp;|&nbsp; N (Constituencies with >0% voteshare): <b class="font-semibold text-gray-800">${n}</b>`;
+			// *** MODIFICATION: Update stats text ***
+			statsText = `Pearson Correlation (r): <b class="font-semibold text-gray-800">${pearsonR.toFixed(3)}</b> &nbsp;|&nbsp; R-squared (R²): <b class="font-semibold text-gray-800">${rSquared.toFixed(3)}</b> &nbsp;|&nbsp; N (Constituencies with >0% voteshare & >0 metric value): <b class="font-semibold text-gray-800">${n}</b>`;
 		} catch (e: any) {
 			console.error("Plotly rendering error:", e);
 			errorMessage = `Plotly rendering error: ${e.message}`;
