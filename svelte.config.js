@@ -1,18 +1,27 @@
-import adapter from '@sveltejs/adapter-auto';
-import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
+// svelte.config.js
+import adapter from "@sveltejs/adapter-vercel"; // Import the Vercel adapter
+import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
-	// Consult https://svelte.dev/docs/kit/integrations
+	// Consult https://kit.svelte.dev/docs/integrations#preprocessors
 	// for more information about preprocessors
 	preprocess: vitePreprocess(),
 
 	kit: {
-		// adapter-auto only supports some environments, see https://svelte.dev/docs/kit/adapter-auto for a list.
-		// If your environment is not supported, or you settled on a specific environment, switch out the adapter.
-		// See https://svelte.dev/docs/kit/adapters for more information about adapters.
-		adapter: adapter()
-	}
+		// Use the Vercel adapter
+		adapter: adapter({
+			// Optional Vercel adapter config:
+			// runtime: 'nodejs18.x', // Specify Node.js runtime if needed
+			// edge: false, // Set to true for Vercel Edge Functions
+			// split: false, // Set to true to split functions (experimental)
+		}),
+		// You can add other kit options here if needed, like 'alias'
+		// alias: {
+		//   '$components': 'src/lib/components',
+		// }
+	},
+	// Note: Vite-specific config like resolve.alias goes in vite.config.js
 };
 
 export default config;
