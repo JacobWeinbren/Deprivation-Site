@@ -20,12 +20,12 @@ export interface PartyOption {
 
 // --- Configuration ---
 export const parties: PartyOption[] = [
-	{ value: "con_voteshare", label: "Conservative Voteshare (%)" },
-	{ value: "lab_voteshare", label: "Labour Voteshare (%)" },
-	{ value: "ld_voteshare", label: "Lib Dem Voteshare (%)" },
-	{ value: "ref_voteshare", label: "Reform UK Voteshare (%)" },
-	{ value: "green_voteshare", label: "Green Voteshare (%)" },
-	{ value: "oth_voteshare", label: "Other Voteshare (%)" },
+	{ value: "con_voteshare", label: "Conservative Voteshare 2024 (%)" },
+	{ value: "lab_voteshare", label: "Labour Voteshare 2024 (%)" },
+	{ value: "ld_voteshare", label: "Lib Dem Voteshare 2024 (%)" },
+	{ value: "ref_voteshare", label: "Reform UK Voteshare 2024 (%)" },
+	{ value: "green_voteshare", label: "Green Voteshare 2024 (%)" },
+	{ value: "oth_voteshare", label: "Other Voteshare 2024 (%)" },
 ];
 
 // --- MODIFIED: Reordered metrics array based on group and internal importance ---
