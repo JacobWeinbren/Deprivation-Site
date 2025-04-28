@@ -61,6 +61,9 @@
 		{ value: "socialrent", label: "Proportion Social Housing (%)" },
 		{ value: "loneprop", label: "Proportion Lone Parent Households (%)" },
 		{ value: "propocc", label: "Proportion NSSEC 3-8 (%)" },
+		{ value: "youngpop", label: "Young Population Proportion (%)" }, // Added
+		{ value: "oldpop", label: "Old Population Proportion (%)" }, // Added
+		{ value: "migrantprop", label: "Migrant Population Proportion (%)" }, // Added
 	];
 
 	// Updated partyColors to match the 'parties' array keys
@@ -233,7 +236,7 @@
 			hovertemplate:
 				`<b>%{text}</b><br>` +
 				`${selectedMetricLabel}: %{x:,.2f}<br>` +
-				`${selectedPartyLabel}: %{y:.2f}%` +
+				`${selectedPartyLabel}: %{y:.2f}` +
 				`<extra></extra>`,
 		});
 		if (regressionLine) {
