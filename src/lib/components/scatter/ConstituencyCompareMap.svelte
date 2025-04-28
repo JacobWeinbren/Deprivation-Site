@@ -438,24 +438,27 @@
 
 		const baseColor =
 			variableType === "party"
-				? partyColors[variableKey] || "#C7002F"
-				: "#225ea8";
+				? partyColors[variableKey] || "#C7002F" // Default party color (e.g., Labour Red)
+				: "#377EB8"; // Default metric base color (Blue - though less relevant now)
+
 		let colorSteps: string[];
 		if (variableType === "party") {
+			// Party map: Green to Purple diverging scheme
 			colorSteps = [
-				lightenColor(baseColor, 0.8),
-				lightenColor(baseColor, 0.6),
-				lightenColor(baseColor, 0.4),
-				lightenColor(baseColor, 0.2),
-				baseColor,
+				"#1b9e77", // Teal green (Low values)
+				"#66c2a5", // Light green
+				"#f7f7f7", // Off-White (Mid values)
+				"#d1b3d9", // Light purple
+				"#7b3294", // Deep purple (High values)
 			];
 		} else {
+			// Metric map: Orange to Blue diverging scheme
 			colorSteps = [
-				"#ffffd9",
-				"#c7e9b4",
-				"#7fcdbb",
-				"#41b6c4",
-				"#225ea8",
+				"#d73027", // Red-orange (Low values)
+				"#fc8d59", // Light orange
+				"#f7f7f7", // Off-White (Mid values)
+				"#91bfdb", // Light blue
+				"#2166ac", // Deep blue (High values)
 			];
 		}
 
@@ -475,10 +478,16 @@
 			if (value === 0) {
 				color = NO_DATA_COLOR;
 			} else if (values.length < 2) {
+				// Not enough data for a range
 				color = NO_DATA_COLOR;
 			} else if (values.length < 5) {
+				// Less than 5 points, use simple interpolation (might look odd with diverging)
 				if (values[values.length - 1] <= values[0]) {
-					color = lightenColor(baseColor, 0.8);
+					// All values are the same, use the middle color (or no data)
+					color =
+						variableType === "metric"
+							? colorSteps[2]
+							: lightenColor(baseColor, 0.8);
 				} else {
 					const min = values[0];
 					const max = values[values.length - 1];
@@ -486,10 +495,12 @@
 						0,
 						Math.min(1, (value - min) / (max - min))
 					);
-					const colorIndex = Math.floor(ratio * 4);
+					// Map ratio to the 5 color steps
+					const colorIndex = Math.min(4, Math.floor(ratio * 5));
 					color = colorSteps[colorIndex];
 				}
 			} else {
+				// Use quintiles for 5+ data points
 				if (value < quintiles[0]) color = colorSteps[0];
 				else if (value < quintiles[1]) color = colorSteps[1];
 				else if (value < quintiles[2]) color = colorSteps[2];
@@ -499,7 +510,7 @@
 			matchExpression.push(code, color);
 		});
 
-		matchExpression.push(NO_DATA_COLOR); // Default case
+		matchExpression.push(NO_DATA_COLOR); // Default case for unmatched IDs or null values
 
 		try {
 			mapInstance.setPaintProperty(
@@ -806,13 +817,22 @@
 		}
 	}
 
-	// Define fixed quintile colors
+	// Define fixed quintile colors for the RIGHT (Metric) legend
+	// --- MODIFIED: Use Red-White-Blue colors ---
 	const metricQuintileColors = [
-		"#ffffd9",
-		"#c7e9b4",
-		"#7fcdbb",
-		"#41b6c4",
-		"#225ea8",
+		"#d73027", // Red-orange (Low)
+		"#fc8d59", // Light orange
+		"#f7f7f7", // Off-White (Mid)
+		"#91bfdb", // Light blue
+		"#2166ac", // Deep blue (High)
+	];
+
+	const partyQuintileColors = [
+		"#1b9e77", // Teal green (Low)
+		"#66c2a5", // Light green
+		"#f7f7f7", // Off-White (Mid)
+		"#d1b3d9", // Light purple
+		"#7b3294", // Deep purple (High)
 	];
 </script>
 
@@ -933,19 +953,9 @@
 					{leftLabel || "Party Data"}
 				</div>
 				{#if leftMinValue !== null && leftMaxValue !== null}
-					{@const basePartyColor =
-						partyColors[selectedParty] || "#888888"}
-					{@const partyQuintileColors = [
-						lightenColor(basePartyColor, 0.8),
-						lightenColor(basePartyColor, 0.6),
-						lightenColor(basePartyColor, 0.4),
-						lightenColor(basePartyColor, 0.2),
-						basePartyColor,
-					]}
 					<div
 						class="flex items-center justify-center sm:justify-start space-x-1"
 					>
-						<!-- MODIFIED: Pass leftLabel to formatter -->
 						<span class="text-[10px] text-gray-500 w-9 text-right"
 							>{formatLegendLabel(leftMinValue, leftLabel)}</span
 						>
@@ -960,16 +970,9 @@
 								></div>
 							{/each}
 						</div>
-						<!-- MODIFIED: Pass leftLabel to formatter -->
 						<span class="text-[10px] text-gray-500 w-9 text-left"
 							>{formatLegendLabel(leftMaxValue, leftLabel)}</span
 						>
-					</div>
-				{:else}
-					<div
-						class="text-[10px] text-gray-400 italic text-center sm:text-left"
-					>
-						(No data range)
 					</div>
 				{/if}
 			</div>
@@ -996,6 +999,7 @@
 						<div
 							class="flex h-3 flex-grow max-w-[120px] rounded-sm overflow-hidden border border-gray-200"
 						>
+							<!-- MODIFIED: Use metricQuintileColors defined in script -->
 							{#each metricQuintileColors as color, i (i)}
 								<div
 									class="flex-1"
