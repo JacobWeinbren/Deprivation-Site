@@ -79,6 +79,80 @@
 	let prevHighlight = highlightedConstituency;
 	let prevDataLength = data?.length ?? 0;
 
+	let customPopupVisible = false;
+	let customPopupContent = "";
+	let customPopupPosition = { x: 0, y: 0 };
+	let containerRect: DOMRect | null = null;
+	let compareContainerElement: HTMLElement;
+
+	// Replace the hover handlers with custom tooltip logic
+	function handleMouseMove(
+		map: MaplibreMap,
+		e: MapMouseEvent,
+		isLeftMap: boolean
+	) {
+		if (!e.features || e.features.length === 0) return;
+
+		map.getCanvas().style.cursor = "pointer";
+		const feature = e.features[0];
+		const featureId = feature.id;
+
+		// Update hovered ID tracking
+		if (
+			(isLeftMap && featureId === hoveredLeftId) ||
+			(!isLeftMap && featureId === hoveredRightId)
+		) {
+			return; // Same feature, just update position
+		}
+
+		if (isLeftMap) {
+			hoveredLeftId = featureId;
+		} else {
+			hoveredRightId = featureId;
+		}
+
+		const name = feature.properties?.[FEATURE_NAME_PROPERTY];
+		const code = feature.properties?.[FEATURE_ID_PROPERTY];
+
+		const constituencyData = data.find((d) => d.const_code === code);
+		const selectedKey = isLeftMap ? selectedParty : selectedMetric;
+		const label = isLeftMap ? leftLabel : rightLabel;
+		const value = constituencyData
+			? getNumericValue(constituencyData, selectedKey)
+			: null;
+		const formattedValue = formatLegendLabel(value, label);
+
+		// Create popup content
+		customPopupContent = `
+      <div class="custom-map-tooltip">
+        <strong class="block text-xs font-medium mb-0.5">${name || "Unknown"}</strong>
+        <span class="block text-[11px] text-gray-600">${label.split("(")[0].trim()}: ${formattedValue}</span>
+      </div>`;
+
+		// Get container position once if not already done
+		if (!containerRect) {
+			containerRect = compareContainerElement.getBoundingClientRect();
+		}
+
+		// Calculate position relative to container
+		customPopupPosition = {
+			x: e.point.x,
+			y: e.point.y,
+		};
+
+		customPopupVisible = true;
+	}
+
+	function handleMouseLeave(map: MaplibreMap, isLeftMap: boolean) {
+		map.getCanvas().style.cursor = "";
+		if (isLeftMap) {
+			hoveredLeftId = null;
+		} else {
+			hoveredRightId = null;
+		}
+		customPopupVisible = false;
+	}
+
 	// Shared constants
 	const SOURCE_ID_LEFT = "constituencies-source-left";
 	const LAYER_ID_LEFT = "constituency-fills-left";
@@ -90,10 +164,6 @@
 	const NO_DATA_COLOR = "#e0e0e0";
 
 	// --- Map Initialization Options ---
-	const bounds: LngLatBoundsLike = [
-		[-10.8, 49.5],
-		[2.0, 61.0],
-	];
 	const minimalStyle: StyleSpecification = {
 		version: 8,
 		sources: {},
@@ -566,9 +636,9 @@
 			mapOptions = {
 				style: minimalStyle,
 				center: [-2, 54.5],
-				zoom: 4.5,
-				minZoom: 4.5,
-				maxZoom: 13,
+				zoom: 5,
+				minZoom: 4,
+				maxZoom: 14,
 				pitch: 0,
 				bearing: 0,
 				pitchWithRotate: false,
@@ -651,108 +721,21 @@
 				}
 			});
 
-			// Hover Handlers (Left Map)
-			mapLeft.on("mousemove", LAYER_ID_LEFT, (e: MapMouseEvent) => {
-				if (!e.features || e.features.length === 0 || !MaplibrePopup)
-					return;
-				mapLeft!.getCanvas().style.cursor = "pointer";
-				const feature = e.features[0];
-				const featureId = feature.id; // Use promoted ID
+			// Replace the hover handlers for left map
+			mapLeft.on("mousemove", LAYER_ID_LEFT, (e) =>
+				handleMouseMove(mapLeft!, e, true)
+			);
+			mapLeft.on("mouseleave", LAYER_ID_LEFT, () =>
+				handleMouseLeave(mapLeft!, true)
+			);
 
-				if (featureId !== hoveredLeftId) {
-					hoveredLeftId = featureId;
-					const name = feature.properties?.[FEATURE_NAME_PROPERTY];
-					const code = feature.properties?.[FEATURE_ID_PROPERTY]; // Get code if needed
-
-					// Find the corresponding data point
-					const constituencyData = data.find(
-						(d) => d.const_code === code
-					);
-					const value = constituencyData
-						? getNumericValue(constituencyData, selectedParty)
-						: null;
-					const formattedValue = formatLegendLabel(value, leftLabel);
-
-					const popupContent = `
-                        <div class="map-tooltip">
-                            <strong class="block text-xs font-medium mb-0.5">${name || "Unknown"}</strong>
-                            <span class="block text-[11px] text-gray-600">${leftLabel.split("(")[0].trim()}: ${formattedValue}</span>
-                        </div>`;
-
-					if (!leftPopup) {
-						leftPopup = new MaplibrePopup({
-							closeButton: false,
-							closeOnClick: false,
-							anchor: "bottom-left",
-							offset: [5, -5], // Adjust offset slightly
-						});
-					}
-					leftPopup
-						.setLngLat(e.lngLat)
-						.setHTML(popupContent)
-						.addTo(mapLeft!);
-				}
-			});
-
-			mapLeft.on("mouseleave", LAYER_ID_LEFT, () => {
-				mapLeft!.getCanvas().style.cursor = "";
-				if (leftPopup) {
-					leftPopup.remove();
-					leftPopup = null; // Reset popup instance
-				}
-				hoveredLeftId = null;
-			});
-
-			// Hover Handlers (Right Map)
-			mapRight.on("mousemove", LAYER_ID_RIGHT, (e: MapMouseEvent) => {
-				if (!e.features || e.features.length === 0 || !MaplibrePopup)
-					return;
-				mapRight!.getCanvas().style.cursor = "pointer";
-				const feature = e.features[0];
-				const featureId = feature.id;
-
-				if (featureId !== hoveredRightId) {
-					hoveredRightId = featureId;
-					const name = feature.properties?.[FEATURE_NAME_PROPERTY];
-					const code = feature.properties?.[FEATURE_ID_PROPERTY];
-
-					const constituencyData = data.find(
-						(d) => d.const_code === code
-					);
-					const value = constituencyData
-						? getNumericValue(constituencyData, selectedMetric)
-						: null;
-					const formattedValue = formatLegendLabel(value, rightLabel);
-
-					const popupContent = `
-                        <div class="map-tooltip">
-                            <strong class="block text-xs font-medium mb-0.5">${name || "Unknown"}</strong>
-                            <span class="block text-[11px] text-gray-600">${rightLabel.split("(")[0].trim()}: ${formattedValue}</span>
-                        </div>`;
-
-					if (!rightPopup) {
-						rightPopup = new MaplibrePopup({
-							closeButton: false,
-							closeOnClick: false,
-							anchor: "bottom-left",
-							offset: [5, -5],
-						});
-					}
-					rightPopup
-						.setLngLat(e.lngLat)
-						.setHTML(popupContent)
-						.addTo(mapRight!);
-				}
-			});
-
-			mapRight.on("mouseleave", LAYER_ID_RIGHT, () => {
-				mapRight!.getCanvas().style.cursor = "";
-				if (rightPopup) {
-					rightPopup.remove();
-					rightPopup = null;
-				}
-				hoveredRightId = null;
-			});
+			// Replace the hover handlers for right map
+			mapRight.on("mousemove", LAYER_ID_RIGHT, (e) =>
+				handleMouseMove(mapRight!, e, false)
+			);
+			mapRight.on("mouseleave", LAYER_ID_RIGHT, () =>
+				handleMouseLeave(mapRight!, false)
+			);
 
 			// --- Final Setup ---
 			isMapReadyForData = true;
@@ -899,6 +882,7 @@
 
 	<!-- Container for the Compare Control -->
 	<div
+		bind:this={compareContainerElement}
 		id="compare-container"
 		class="relative w-full h-[450px] sm:h-[500px] rounded-t-lg overflow-hidden bg-gray-100 {isLoading ||
 		errorMessage
@@ -916,6 +900,18 @@
 			id={mapIdRight}
 			class="absolute top-0 bottom-0 w-full h-full opacity-0 transition-opacity duration-500 ease-in-out"
 		></div>
+
+		<!-- Custom popup that floats above both maps -->
+		{#if customPopupVisible}
+			<div
+				class="custom-popup absolute pointer-events-none z-[1000]"
+				style="left: {customPopupPosition.x}px; top: {customPopupPosition.y}px;"
+			>
+				<div class="custom-popup-content">
+					{@html customPopupContent}
+				</div>
+			</div>
+		{/if}
 	</div>
 
 	<!-- Combined Legend -->
@@ -1032,8 +1028,6 @@
 
 <!-- Global Styles for Compare Control & Tooltip -->
 <style>
-	/* Removed debug bar */
-
 	#compare-container {
 		position: relative;
 		overflow: hidden;
@@ -1080,6 +1074,7 @@
 		transform: translate(-50%, -50%); /* Precise centering */
 		margin: 0 !important; /* Reset margins */
 	}
+
 	/* Adjust cursor for horizontal swiper handle */
 	:global(#compare-container .maplibregl-compare .compare-swiper-horizontal) {
 		cursor: ns-resize;
@@ -1165,7 +1160,7 @@
 		bottom: 7px;
 	}
 
-	/* Map Tooltip Styling */
+	/* Map Tooltip Styling - Keep for compatibility but we won't use it */
 	:global(.maplibregl-popup-content.map-tooltip) {
 		background-color: rgba(0, 0, 0, 0.8);
 		color: #ffffff;
@@ -1183,13 +1178,65 @@
 		font-weight: bold;
 		font-size: 12px; /* Slightly larger for title */
 	}
-	:global(.maplibregl-popup-anchor-top .maplibregl-popup-tip),
-	:global(.maplibregl-popup-anchor-bottom .maplibregl-popup-tip),
-	:global(.maplibregl-popup-anchor-left .maplibregl-popup-tip),
-	:global(.maplibregl-popup-anchor-right .maplibregl-popup-tip) {
-		/* Optional: Style the popup arrow if needed, or hide it */
-		/* Example: border-top-color: rgba(0, 0, 0, 0.8); */
-		display: none; /* Hide the default arrow for cleaner look */
+
+	/* NEW CUSTOM POPUP STYLES */
+	.custom-popup {
+		transform: translate(-50%, -100%);
+		margin-top: -5px; /* Small offset from pointer */
+		animation: fadeIn 150ms ease-out forwards;
+	}
+
+	@keyframes fadeIn {
+		from {
+			opacity: 0;
+			transform: translate(-50%, -90%);
+		}
+		to {
+			opacity: 1;
+			transform: translate(-50%, -100%);
+		}
+	}
+
+	.custom-popup-content {
+		background-color: white;
+		color: #333;
+		border-radius: 4px;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+		padding: 8px 10px;
+		font-size: 12px;
+		max-width: 240px;
+		border: 1px solid rgba(0, 0, 0, 0.1);
+		position: relative;
+	}
+
+	/* Optional: Add a small arrow/tip at the bottom */
+	.custom-popup-content::after {
+		content: "";
+		position: absolute;
+		bottom: -5px;
+		left: 50%;
+		transform: translateX(-50%);
+		width: 0;
+		height: 0;
+		border-left: 5px solid transparent;
+		border-right: 5px solid transparent;
+		border-top: 5px solid white;
+		filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.1));
+	}
+
+	/* Style for the title in popup */
+	:global(.custom-map-tooltip strong) {
+		display: block;
+		font-weight: 600;
+		margin-bottom: 2px;
+		font-size: 12px;
+	}
+
+	/* Style for the value in popup */
+	:global(.custom-map-tooltip span) {
+		display: block;
+		color: #666;
+		font-size: 11px;
 	}
 
 	.relative {
