@@ -200,10 +200,10 @@
 </script>
 
 <svelte:head>
-	<title>UK Constituency Explorer</title>
+	<title>British Constituency Explorer</title>
 	<meta
 		name="description"
-		content="Compare 2024 election results and socio-economic data across UK constituencies."
+		content="Compare 2024 election results and socio-economic data across British constituencies."
 	/>
 	<!-- REMOVE Mapbox CSS links -->
 </svelte:head>
@@ -214,7 +214,7 @@
 		<h1
 			class="text-2xl sm:text-3xl font-semibold text-center mb-4 text-gray-800"
 		>
-			UK Constituency Explorer
+			British Constituency Explorer
 		</h1>
 		<p class="text-center text-sm text-gray-600 mb-8 max-w-2xl mx-auto">
 			Compare 2024 General Election results with socio-economic data.
