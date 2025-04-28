@@ -470,7 +470,11 @@
 
 		Object.entries(codeToValue).forEach(([code, value]) => {
 			let color = NO_DATA_COLOR;
-			if (values.length < 2) {
+
+			// Check if value is exactly 0, treat as NO_DATA
+			if (value === 0) {
+				color = NO_DATA_COLOR;
+			} else if (values.length < 2) {
 				color = NO_DATA_COLOR;
 			} else if (values.length < 5) {
 				if (values[values.length - 1] <= values[0]) {
