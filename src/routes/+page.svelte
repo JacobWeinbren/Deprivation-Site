@@ -237,7 +237,6 @@
 						{selectedParty}
 						{selectedMetric}
 						{highlightedConstituency} 
-						mapboxAccessToken={mapboxToken} 
 						{metrics}
 						{parties} 
 						{partyColors}
