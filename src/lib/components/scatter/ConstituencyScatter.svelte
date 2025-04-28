@@ -502,14 +502,13 @@
 	>
 		<p>
 			<strong>Note on SEISA (2021):</strong> This socio-economic index combines
-			factors like qualifications, occupation, housing tenure (renting), health,
-			lone parenthood, age demographics, migration, and household income.
+			factors including qualifications and occupation.
 		</p>
 		<p>
-			<strong>Note on IMD (Index of Multiple Deprivation):</strong> This index
-			measures deprivation across domains including Income, Employment, Education,
-			Health, Crime, Housing/Services Barriers, and Living Environment. Components
-			may vary slightly by UK nation.
+			<strong>Note on IMD (2020):</strong> This index measures deprivation
+			across domains including Income, Employment, Education, Health, Crime,
+			Housing/Services Barriers, and Living Environment. Components may vary
+			slightly by UK nation.
 		</p>
 	</div>
 
