@@ -1,8 +1,11 @@
 // src/routes/+page.server.ts
-import fs from "fs";
-import path from "path";
+// REMOVE: import fs from "fs";
+// REMOVE: import path from "path";
 import Papa from "papaparse";
 import type { PageServerLoad } from "./$types";
+
+// Import the raw content of the CSV file at build time
+import csvFileContent from "$lib/data/constituency_data.csv?raw";
 
 // Define the expected structure of a row in your CSV data
 interface ConstituencyDataRow {
@@ -23,8 +26,9 @@ interface ConstituencyDataRow {
 	con_voteshare?: number | null;
 	lab_voteshare?: number | null;
 	ld_voteshare?: number | null;
-	ruk_voteshare?: number | null; // Assuming Reform UK
+	ref_voteshare?: number | null; // Corrected key if using 'ref_' in CSV
 	green_voteshare?: number | null;
+	pc_voteshare?: number | null; // Added Plaid Cymru if present
 	oth_voteshare?: number | null;
 	[key: string]: string | number | undefined | null; // Allow other properties
 }
@@ -33,46 +37,62 @@ export const load: PageServerLoad = async () => {
 	let chartData: ConstituencyDataRow[] = [];
 	let error: string | null = null;
 
-	// Construct the absolute path to the CSV file relative to the project root
-	// Note: Adjust path if your project structure differs or if running in specific environments
-	const csvFilePath = path.resolve(
-		process.cwd(),
-		"src/lib/data/constituency_data.csv"
-	);
-	console.log(`Attempting to load CSV from: ${csvFilePath}`);
+	// No longer need to construct file path or check existence with fs
+	// const csvFilePath = path.resolve(process.cwd(), 'src/lib/data/constituency_data.csv');
+	// console.log(`Attempting to load CSV from: ${csvFilePath}`); // Keep for local debug if needed
 
 	try {
-		if (!fs.existsSync(csvFilePath)) {
-			throw new Error(`CSV file not found at ${csvFilePath}`);
+		// Check if the imported content is actually a string (it should be)
+		if (typeof csvFileContent !== "string" || csvFileContent.length === 0) {
+			throw new Error(
+				"CSV file content was not loaded correctly during build."
+			);
 		}
 
-		const csvFileContent = fs.readFileSync(csvFilePath, "utf-8");
+		// Parse the imported string content directly
 		const parseResult = Papa.parse<ConstituencyDataRow>(csvFileContent, {
 			header: true,
 			skipEmptyLines: true,
-			dynamicTyping: true,
-			transformHeader: (header) => header.trim(),
+			dynamicTyping: true, // Attempts to convert numbers/booleans
+			transformHeader: (header) => header.trim(), // Good practice
 		});
 
 		if (parseResult.errors.length > 0) {
 			console.error("CSV Parsing Errors:", parseResult.errors);
-			// Decide if errors are critical. Maybe filter out rows with errors.
-			// For now, we'll log and continue.
+			// Consider how critical these errors are. Maybe throw an error or just log.
+			// Example: Only log the first few errors
+			error = `Encountered ${parseResult.errors.length} errors during CSV parsing. Check console logs.`;
+			// Optionally throw if any error is critical:
+			// throw new Error(`CSV Parsing failed: ${parseResult.errors[0].message}`);
 		}
 
-		// Filter out rows missing essential identifiers
+		// Filter out rows missing essential identifiers or with parsing issues if needed
 		chartData = parseResult.data.filter(
 			(row) =>
+				row && // Ensure row object exists
 				row.constituency_name &&
 				typeof row.constituency_name === "string" &&
-				row.const_code
+				row.const_code // Ensure const_code is present
 		);
-		console.log(
-			`Successfully loaded and parsed ${chartData.length} valid constituency rows.`
-		);
+
+		if (chartData.length === 0 && parseResult.data.length > 0) {
+			console.warn(
+				"CSV parsed, but no valid rows found after filtering (missing name or code?)."
+			);
+			// Potentially set an error if no data is usable
+			if (!error) {
+				// Avoid overwriting a parsing error
+				error =
+					"Loaded data but could not find valid constituency rows.";
+			}
+		} else {
+			console.log(
+				`Successfully parsed ${chartData.length} valid constituency rows from imported content.`
+			);
+		}
 	} catch (err: any) {
-		console.error("Error loading or parsing CSV file:", err);
-		error = `Failed to load constituency data: ${err.message}`;
+		console.error("Error processing imported CSV content:", err);
+		error = `Failed to process constituency data: ${err.message}`;
 		chartData = []; // Ensure data is empty on error
 	}
 
