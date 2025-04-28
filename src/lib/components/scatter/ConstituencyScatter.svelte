@@ -282,7 +282,6 @@
 			currentPlotPoints = [...plotPoints];
 			currentTooltipLabels = currentPlotPoints.map((p) => p.label);
 
-			// *** FIX: Declare stat variables *before* the if/else block ***
 			let regressionLinePoints: { x: number; y: number }[] = [];
 			let pearsonR: number = NaN;
 			let rSquared: number = NaN;
@@ -292,10 +291,8 @@
 				console.warn(
 					`Not enough valid data points (${statPoints.length}) for correlation.`
 				);
-				// Values remain NaN/[]/0 as initialized above
-				n = statPoints.length; // Still report the number of points used
+				n = statPoints.length;
 			} else {
-				// Statistical calculations are safe here
 				n = statPoints.length;
 				try {
 					const xValues = statPoints.map((p) => p[0]);
@@ -322,14 +319,12 @@
 						"Scatter: Error during statistical calculation:",
 						statError
 					);
-					// Reset stats if calculation fails
 					pearsonR = NaN;
 					rSquared = NaN;
 					regressionLinePoints = [];
 				}
 			}
 
-			// Configure point appearance
 			const defaultPointSize = compact ? 2.5 : 3;
 			const pointSizes = currentPlotPoints.map(() => defaultPointSize);
 			const pointBorderColors = currentPlotPoints.map(
@@ -337,7 +332,6 @@
 			);
 			const pointBorderWidths = currentPlotPoints.map(() => 0);
 
-			// Define chart datasets
 			const datasets: any[] = [
 				{
 					label: "Constituencies",
@@ -363,10 +357,16 @@
 					borderColor: "rgba(0, 0, 0, 0.4)",
 					borderWidth: 1,
 					borderDash: [4, 4],
-					pointRadius: 0,
+					pointRadius: 0, // No visible points on the line
 					fill: false,
 					tension: 0.1,
 					order: 0,
+					// --- Disable interaction for the trend line ---
+					pointHitRadius: 0, // No hit detection for points
+					pointHoverRadius: 0, // No hover effect for points
+					hitRadius: 0, // No hit detection for the line itself
+					hoverRadius: 0, // No hover effect for the line itself
+					// --- End interaction disabling ---
 				});
 			}
 
@@ -406,6 +406,7 @@
 			const tooltipLabelCallback = (context: any) => {
 				const index = context.dataIndex;
 				const datasetIndex = context.datasetIndex;
+				// Only show tooltips for the main scatter points (datasetIndex 0)
 				if (
 					datasetIndex === 0 &&
 					index >= 0 &&
@@ -424,6 +425,7 @@
 						`${selectedPartyLabel.split("(")[0].trim()}: ${y}%`,
 					];
 				}
+				// Return null for other datasets (like the trend line)
 				return null;
 			};
 
@@ -467,7 +469,7 @@
 								: { top: 10, right: 15, bottom: 5, left: 5 },
 						},
 						interaction: {
-							mode: "nearest",
+							mode: "nearest", // Still useful for finding the nearest *scatter* point
 							intersect: false,
 							axis: "xy",
 						},
@@ -490,6 +492,10 @@
 								bodyFont: { size: fontSizes.tooltipBodySize },
 								callbacks: {
 									label: tooltipLabelCallback,
+								},
+								// Filter out tooltips for the trend line dataset
+								filter: function (tooltipItem) {
+									return tooltipItem.datasetIndex === 0;
 								},
 							},
 							title: {
@@ -557,6 +563,7 @@
 						onClick: (_event: MouseEvent, elements: any[]) => {
 							if (!elements || elements.length === 0) return;
 							const element = elements[0];
+							// Ensure click is only processed for the main scatter dataset (index 0)
 							if (element.datasetIndex === 0) {
 								const index = element.index;
 								if (
@@ -587,7 +594,6 @@
 					</div>
 				`;
 			} else if (statPoints.length < 5 && n > 0) {
-				// Check n > 0 as well
 				statsText = `<div class="text-center text-gray-500 text-xs px-2 italic">N=${n.toLocaleString()} (Not enough data for correlation)</div>`;
 			} else {
 				statsText = `<div class="text-center text-gray-500 text-xs px-2 italic">Correlation not calculated</div>`;
