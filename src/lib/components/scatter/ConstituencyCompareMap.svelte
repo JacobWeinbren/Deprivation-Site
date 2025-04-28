@@ -660,6 +660,10 @@
 				dragRotate: false,
 				touchZoomRotate: false,
 				attributionControl: false,
+				maxBounds: [
+					[-25, 49], // Southwest coordinates (left, bottom)
+					[20, 61], // Northeast coordinates (right, top)
+				] as LngLatBoundsLike,
 			};
 
 			mapLeft = new maplibregl.Map({
