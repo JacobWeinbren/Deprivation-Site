@@ -28,7 +28,7 @@ export const parties: PartyOption[] = [
 	{ value: "oth_voteshare", label: "Other Voteshare 2024 (%)" },
 ];
 
-// --- MODIFIED: Reordered metrics array based on group and internal importance ---
+// --- MODIFIED: Added aggregated age groups and reordered ---
 export const metrics: MetricOption[] = [
 	// Group: Deprivation (IMD/SEISA) - Importance #1
 	{
@@ -116,12 +116,12 @@ export const metrics: MetricOption[] = [
 	},
 	{
 		value: "oldpop",
-		label: "Old Population Proportion (%)", // Age structure
+		label: "Old Population Proportion (%)", // Original age metric
 		group: "Social/Demographic",
 	},
 	{
 		value: "youngpop",
-		label: "Young Population Proportion (%)", // Age structure
+		label: "Young Population Proportion (%)", // Original age metric
 		group: "Social/Demographic",
 	},
 	{
@@ -130,6 +130,31 @@ export const metrics: MetricOption[] = [
 		group: "Social/Demographic",
 	},
 	// Group: Census: Demographics - Importance #5 (Census Start)
+	{
+		value: "census_Age0to15",
+		label: "Census: Population Aged 0-15 (%)",
+		group: "Census: Demographics",
+	},
+	{
+		value: "census_Age16to24",
+		label: "Census: Population Aged 16-24 (%)",
+		group: "Census: Demographics",
+	},
+	{
+		value: "census_Age25to39",
+		label: "Census: Population Aged 25-39 (%)",
+		group: "Census: Demographics",
+	},
+	{
+		value: "census_Age40to59",
+		label: "Census: Population Aged 40-59 (%)",
+		group: "Census: Demographics",
+	},
+	{
+		value: "census_Age60to74",
+		label: "Census: Population Aged 60-74 (%)",
+		group: "Census: Demographics",
+	},
 	{
 		value: "census_Age75plus",
 		label: "Census: Population Aged 75+ (%)",
@@ -235,7 +260,7 @@ export function getGroupedMetrics(
 			.get(group)
 			?.push({ value: metric.value, label: metric.label });
 	});
-	// Optional: Sort groups
+	// Optional: Sort groups alphabetically for display in dropdowns etc.
 	return new Map(
 		[...newGroupedMetrics.entries()].sort((a, b) =>
 			a[0].localeCompare(b[0])
