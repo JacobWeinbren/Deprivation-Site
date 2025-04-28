@@ -1,6 +1,6 @@
 <!-- src/routes/+page.svelte -->
 <script lang="ts">
-	import ConstituencyScatter from "$lib/components/ConstituencyScatter.svelte";
+	import ConstituencyScatter from "$lib/components/scatter/ConstituencyScatter.svelte";
 	import type { PageData } from "./$types"; // Keep this import
 
 	// Data loaded from +page.server.ts
