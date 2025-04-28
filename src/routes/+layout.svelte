@@ -1,8 +1,8 @@
 <!-- src/routes/+layout.svelte -->
 <script lang="ts">
 	// Import global styles required by libraries
-	import "mapbox-gl/dist/mapbox-gl.css"; // Base Mapbox styles
-	import "mapbox-gl-compare/dist/mapbox-gl-compare.css"; // Compare plugin styles
+	import "maplibre-gl/dist/maplibre-gl.css"; // Base MapLibre styles
+	import "@maplibre/maplibre-gl-compare/dist/maplibre-gl-compare.css"; // MapLibre Compare plugin styles
 
 	// Import your own global styles if you have them
 	import "../app.css"; // Example: Your global app styles

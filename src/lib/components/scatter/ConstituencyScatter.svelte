@@ -1,6 +1,4 @@
 <!-- src/lib/components/scatter/ConstituencyScatter.svelte -->
-
-<!-- Ambient module declaration MUST be at the top level -->
 <script lang="ts">
 	// Type definitions for Chart.js and its plugins
 	declare global {
@@ -18,17 +16,16 @@
 		resize(): void;
 		data: any;
 		options: any;
+		isDatasetVisible(datasetIndex: number): boolean;
 	}
 	interface ResponsiveFontSizes {
 		titleSize: number;
 		axisTitleSize: number;
 		tickSize: number;
-		annotationSize: number;
 		tooltipTitleSize: number;
 		tooltipBodySize: number;
 	}
 
-	// Use only core Svelte imports
 	import { onMount, onDestroy, createEventDispatcher } from "svelte";
 	import {
 		type ConstituencyData,
@@ -59,9 +56,8 @@
 	let statsText: string = "";
 	let isMounted: boolean = false;
 	let chart: ChartInstance | null = null;
-	let ss: any = null;
+	let ss: any = null; // For simple-statistics
 	let resizeObserver: ResizeObserver | null = null;
-	// Search/Highlight state moved to parent
 	let currentPlotPoints: {
 		x: number;
 		y: number;
@@ -74,11 +70,11 @@
 	let prevSelectedParty = selectedParty;
 	let prevSelectedMetric = selectedMetric;
 	let prevDataLength = data?.length ?? 0;
-	let prevHighlight = highlightedConstituency; // Track previous highlight
+	let prevHighlight = highlightedConstituency;
 
 	const dispatch = createEventDispatcher<{
 		constituencyClick: { name: string };
-	}>(); // Type the dispatch event
+	}>();
 
 	// --- Responsive Settings ---
 	const smallBreakpoint = 640; // px width threshold for smaller text
@@ -88,11 +84,10 @@
 		const isSmall = width < smallBreakpoint;
 		return {
 			titleSize: isSmall ? 14 : 16,
-			axisTitleSize: isSmall ? 11 : 13,
-			tickSize: isSmall ? 9 : 11,
-			annotationSize: isSmall ? 9 : 11, // Keep consistent
+			axisTitleSize: isSmall ? 11 : 12,
+			tickSize: isSmall ? 9 : 10,
 			tooltipTitleSize: isSmall ? 11 : 13,
-			tooltipBodySize: isSmall ? 10 : 12,
+			tooltipBodySize: isSmall ? 10 : 11,
 		};
 	}
 
@@ -103,26 +98,32 @@
 			!chart.data.datasets ||
 			!chart.data.datasets[0] ||
 			!currentPlotPoints ||
-			currentPlotPoints.length === 0
-		)
+			currentPlotPoints.length === 0 ||
+			!chart.isDatasetVisible(0)
+		) {
 			return;
+		}
+
 		const dataset = chart.data.datasets[0];
-		const defaultPointSize = 3;
-		const highlightedPointSize = 6;
-		// Use the prop directly
-		dataset.pointRadius = currentPlotPoints.map((p) =>
-			p.label === highlightedConstituency
-				? highlightedPointSize
-				: defaultPointSize
-		);
-		dataset.borderColor = currentPlotPoints.map((p) =>
-			p.label === highlightedConstituency ? "#000000" : "transparent"
-		);
-		dataset.borderWidth = currentPlotPoints.map((p) =>
-			p.label === highlightedConstituency ? 1.5 : 0
-		);
-		// Avoid calling update if the chart is currently animating or updating
+		const defaultPointSize = compact ? 2.5 : 3;
+		const highlightedPointSize = compact ? 5 : 6;
+
 		try {
+			dataset.pointRadius = currentPlotPoints.map((p) =>
+				p.label === highlightedConstituency
+					? highlightedPointSize
+					: defaultPointSize
+			);
+			const highlightBorderColor = "#1D4ED8"; // Tailwind blue-700
+			dataset.borderColor = currentPlotPoints.map((p) =>
+				p.label === highlightedConstituency
+					? highlightBorderColor
+					: "transparent"
+			);
+			dataset.borderWidth = currentPlotPoints.map((p) =>
+				p.label === highlightedConstituency ? 1.5 : 0
+			);
+
 			chart.update("none");
 		} catch (e) {
 			console.error("Error updating chart highlight:", e);
@@ -132,83 +133,111 @@
 	// --- Select constituency and DISPATCH event ---
 	function dispatchConstituencyClick(name: string) {
 		console.log("Scatter: Dispatching click for", name);
-		dispatch("constituencyClick", { name: name }); // Notify parent
+		dispatch("constituencyClick", { name: name });
 	}
 
 	// --- Load Chart.js ---
 	async function loadChartLibraries() {
-		if (!window.Chart) {
-			try {
-				const [chartModule, trendlineModule, annotationModule] =
-					await Promise.all([
-						import("chart.js"),
-						import("chartjs-plugin-trendline"),
-						import("chartjs-plugin-annotation"),
-					]);
-				const {
-					Chart,
-					LinearScale,
-					PointElement,
-					LineElement,
-					Tooltip,
-					Legend,
-					Title: ChartTitle,
-					ScatterController,
-					LineController,
-				} = chartModule;
-				Chart.register(
-					LinearScale,
-					PointElement,
-					LineElement,
-					Tooltip,
-					Legend,
-					ChartTitle,
-					ScatterController,
-					LineController,
-					trendlineModule.default,
-					annotationModule.default
-				);
-				window.Chart = Chart;
-			} catch (e) {
-				console.error("Failed to load Chart.js or plugins:", e);
-				throw new Error("Failed to load chart library.");
+		if (window.Chart && typeof ss?.linearRegression === "function") {
+			return;
+		}
+		try {
+			const [chartModule, simpleStatsModule] = await Promise.all([
+				window.Chart
+					? Promise.resolve({
+							Chart: window.Chart,
+							register: window.Chart.register,
+						})
+					: import("chart.js/auto"),
+				import("simple-statistics"),
+			]);
+
+			if (!window.Chart && chartModule.Chart) {
+				window.Chart = chartModule.Chart;
+				console.log("Scatter: Chart.js loaded via dynamic import.");
+			} else {
+				console.log("Scatter: Chart.js already available.");
 			}
+
+			ss = simpleStatsModule;
+			if (typeof ss?.linearRegression !== "function") {
+				throw new Error(
+					"Simple statistics library failed to load correctly."
+				);
+			}
+			console.log("Scatter: Simple-statistics loaded.");
+		} catch (e) {
+			console.error("Failed to load chart libraries:", e);
+			throw new Error(`Failed to load chart libraries: ${e}`);
 		}
 	}
 
 	// --- Main chart update function ---
-	function updateChart() {
-		// Use props selectedParty and selectedMetric directly
-		// console.log(`Scatter: Updating chart for Party=${selectedParty}, Metric=${selectedMetric}`);
-
+	async function updateChart() {
 		if (
 			!isMounted ||
 			!canvas ||
 			!placeholderElement ||
 			!statsElement ||
-			!ss ||
-			!chartContainer
+			!chartContainer ||
+			typeof window.Chart !== "function" ||
+			typeof ss?.linearRegression !== "function"
 		) {
+			console.warn(
+				"Scatter: updateChart called before mount or library load. Aborting."
+			);
 			isLoading = false;
 			return;
 		}
 
-		// Don't set isLoading=true here for every minor update, only for initial load
-		errorMessage = null; // Clear previous errors on update attempt
-		statsText = "";
-
-		// Show loading only if chart doesn't exist yet (initial load)
-		if (!chart) {
-			isLoading = true;
-			placeholderElement.innerHTML = `<div class="flex flex-col items-center justify-center text-center"><div class="animate-pulse flex space-x-2 mb-2"><div class="h-2 w-2 bg-gray-400 rounded-full"></div><div class="h-2 w-2 bg-gray-400 rounded-full"></div><div class="h-2 w-2 bg-gray-400 rounded-full"></div></div><p class="text-gray-600 text-sm">Analyzing data...</p></div>`;
-			canvas.style.display = "none";
+		if (!Array.isArray(data)) {
+			console.error(
+				"Scatter: Data prop is not an array!",
+				typeof data,
+				data
+			);
+			errorMessage =
+				"Chart Error: Invalid data received. Expected an array.";
+			placeholderElement.innerHTML = `<p class="text-sm text-red-600 p-4">${errorMessage}</p>`;
 			placeholderElement.style.display = "flex";
+			canvas.style.display = "none";
+			isLoading = false;
+			if (chart) {
+				chart.destroy();
+				chart = null;
+			}
+			return;
 		}
 
-		try {
-			// Libraries loaded in onMount
+		errorMessage = null;
+		statsText = "";
+		isLoading = true;
 
+		if (!chart) {
+			placeholderElement.innerHTML = `
+				<div class="flex flex-col items-center justify-center text-center p-4">
+					<svg class="animate-spin h-6 w-6 text-blue-600 mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+						<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+						<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+					</svg>
+					<p class="text-gray-500 text-xs font-medium">Analyzing data...</p>
+				</div>`;
+		}
+		canvas.style.display = "none";
+		placeholderElement.style.display = "flex";
+
+		await new Promise((resolve) => setTimeout(resolve, 10));
+
+		try {
 			const containerWidth = chartContainer.clientWidth;
+			if (containerWidth === 0) {
+				console.warn(
+					"Scatter: Chart container width is 0. Skipping update."
+				);
+				isLoading = false;
+				placeholderElement.innerHTML = `<p class="text-xs text-orange-600 p-4">Chart container not ready.</p>`;
+				return;
+			}
 			const fontSizes = getResponsiveFontSizes(containerWidth);
 
 			const currentParty = selectedParty;
@@ -221,7 +250,6 @@
 				currentMetric;
 			const color = partyColors[currentParty] || "#6B7280";
 
-			// Prepare data points
 			const plotPoints: {
 				x: number;
 				y: number;
@@ -235,11 +263,8 @@
 				const name = row.constituency_name;
 				const id =
 					row.const_code ||
-					String(
-						row.constituency_id ||
-							row.ons_id ||
-							`${name}-${xVal}-${yVal}`
-					);
+					`${name}-${xVal}-${yVal}-${Math.random()}`;
+
 				if (
 					xVal !== null &&
 					yVal !== null &&
@@ -257,52 +282,60 @@
 			currentPlotPoints = [...plotPoints];
 			currentTooltipLabels = currentPlotPoints.map((p) => p.label);
 
-			if (statPoints.length < 3) {
-				throw new Error(
-					"Not enough valid data points (>0) for correlation."
-				);
-			}
-
-			// Statistical calculations
-			let regressionLine: { x: number[]; y: number[] } | null = null;
+			// *** FIX: Declare stat variables *before* the if/else block ***
+			let regressionLinePoints: { x: number; y: number }[] = [];
 			let pearsonR: number = NaN;
 			let rSquared: number = NaN;
-			const n = statPoints.length;
-			const xValues = statPoints.map((p) => p[0]);
-			const yValues = statPoints.map((p) => p[1]);
-			const regression = ss.linearRegression(statPoints);
-			const regressionFunction = ss.linearRegressionLine(regression);
-			pearsonR = ss.sampleCorrelation(xValues, yValues);
-			rSquared = pearsonR * pearsonR;
-			const xMin = ss.min(xValues);
-			const xMax = ss.max(xValues);
-			const numPoints = 50;
-			const xStep = (xMax - xMin) / (numPoints - 1);
-			const regressionPoints = [];
-			for (let i = 0; i < numPoints; i++) {
-				const x = xMin + i * xStep;
-				let y = regressionFunction(x);
-				regressionPoints.push({ x, y });
-			}
-			regressionLine = {
-				x: regressionPoints.map((p) => p.x),
-				y: regressionPoints.map((p) => p.y),
-			};
+			let n: number = 0;
 
-			// Configure point appearance using highlightedConstituency prop
-			const defaultPointSize = 3;
-			const highlightedPointSize = 6;
-			const pointSizes = currentPlotPoints.map((p) =>
-				p.label === highlightedConstituency
-					? highlightedPointSize
-					: defaultPointSize
+			if (statPoints.length < 5) {
+				console.warn(
+					`Not enough valid data points (${statPoints.length}) for correlation.`
+				);
+				// Values remain NaN/[]/0 as initialized above
+				n = statPoints.length; // Still report the number of points used
+			} else {
+				// Statistical calculations are safe here
+				n = statPoints.length;
+				try {
+					const xValues = statPoints.map((p) => p[0]);
+					const yValues = statPoints.map((p) => p[1]);
+					const regression = ss.linearRegression(statPoints);
+					const regressionFunction =
+						ss.linearRegressionLine(regression);
+					pearsonR = ss.sampleCorrelation(xValues, yValues);
+					rSquared = pearsonR * pearsonR;
+
+					const xMin = ss.min(xValues);
+					const xMax = ss.max(xValues);
+					const numPoints = 20;
+					const xStep = (xMax - xMin) / (numPoints - 1);
+					for (let i = 0; i < numPoints; i++) {
+						const x = xMin + i * xStep;
+						const y = regressionFunction(x);
+						if (isFinite(y)) {
+							regressionLinePoints.push({ x, y });
+						}
+					}
+				} catch (statError) {
+					console.warn(
+						"Scatter: Error during statistical calculation:",
+						statError
+					);
+					// Reset stats if calculation fails
+					pearsonR = NaN;
+					rSquared = NaN;
+					regressionLinePoints = [];
+				}
+			}
+
+			// Configure point appearance
+			const defaultPointSize = compact ? 2.5 : 3;
+			const pointSizes = currentPlotPoints.map(() => defaultPointSize);
+			const pointBorderColors = currentPlotPoints.map(
+				() => "transparent"
 			);
-			const pointBorderColors = currentPlotPoints.map((p) =>
-				p.label === highlightedConstituency ? "#000000" : "transparent"
-			);
-			const pointBorderWidths = currentPlotPoints.map((p) =>
-				p.label === highlightedConstituency ? 1.5 : 0
-			);
+			const pointBorderWidths = currentPlotPoints.map(() => 0);
 
 			// Define chart datasets
 			const datasets: any[] = [
@@ -313,66 +346,112 @@
 					borderColor: pointBorderColors,
 					borderWidth: pointBorderWidths,
 					pointRadius: pointSizes,
-					pointHoverRadius: 8,
-					pointHitRadius: 6,
-					pointHoverBorderWidth: 2,
+					pointHoverRadius: compact ? 5 : 6,
+					pointHitRadius: compact ? 8 : 10,
+					pointHoverBorderWidth: 1.5,
 					pointHoverBackgroundColor: color,
 					pointHoverBorderColor: "#000000",
+					order: 1,
 				},
 			];
-			if (regressionLine) {
+			if (regressionLinePoints.length > 1) {
 				datasets.push({
 					type: "line",
 					label: "Trend",
-					data: regressionLine.x.map((x, i) => ({
-						x,
-						y: regressionLine.y[i],
-					})),
+					data: regressionLinePoints,
 					backgroundColor: "transparent",
-					borderColor: "rgba(0, 0, 0, 0.6)",
-					borderWidth: 1.5,
+					borderColor: "rgba(0, 0, 0, 0.4)",
+					borderWidth: 1,
+					borderDash: [4, 4],
 					pointRadius: 0,
 					fill: false,
 					tension: 0.1,
+					order: 0,
 				});
 			}
 
 			const chartTitleText =
 				title || `${selectedPartyLabel} vs ${selectedMetricLabel}`;
 
-			// If chart exists, update data and options. If not, create it.
+			const formatXAxisTick = (value: any) => {
+				const numValue = Number(value);
+				if (isNaN(numValue)) return value;
+				if (
+					selectedMetricLabel.includes("(£)") ||
+					selectedMetricLabel.toLowerCase().includes("price") ||
+					selectedMetricLabel.toLowerCase().includes("income")
+				) {
+					return numValue >= 1000
+						? `£${(numValue / 1000).toFixed(0)}k`
+						: `£${numValue.toLocaleString()}`;
+				}
+				if (selectedMetricLabel.includes("(%)")) {
+					return `${numValue.toFixed(0)}%`;
+				}
+				if (Math.abs(numValue) >= 10000)
+					return (numValue / 1000).toFixed(0) + "k";
+				if (Math.abs(numValue) < 10 && numValue !== 0)
+					return numValue.toFixed(1);
+				return numValue.toLocaleString(undefined, {
+					maximumFractionDigits: 0,
+				});
+			};
+
+			const formatYAxisTick = (value: any) => {
+				const numValue = Number(value);
+				if (isNaN(numValue)) return value;
+				return `${numValue.toFixed(0)}%`;
+			};
+
+			const tooltipLabelCallback = (context: any) => {
+				const index = context.dataIndex;
+				const datasetIndex = context.datasetIndex;
+				if (
+					datasetIndex === 0 &&
+					index >= 0 &&
+					index < currentTooltipLabels.length
+				) {
+					const pointLabel = currentTooltipLabels[index];
+					const x = context.parsed.x.toLocaleString(undefined, {
+						maximumFractionDigits: 1,
+					});
+					const y = context.parsed.y.toLocaleString(undefined, {
+						maximumFractionDigits: 1,
+					});
+					return [
+						pointLabel,
+						`${selectedMetricLabel.split("(")[0].trim()}: ${x}`,
+						`${selectedPartyLabel.split("(")[0].trim()}: ${y}%`,
+					];
+				}
+				return null;
+			};
+
 			if (chart) {
-				// console.log("Scatter: Updating existing chart instance.");
-				chart.data.datasets = datasets; // Update datasets
+				chart.data.datasets = datasets;
 				chart.options.plugins.title.text = chartTitleText;
 				chart.options.plugins.title.display =
 					!compact && !!chartTitleText;
 				chart.options.scales.x.title.text = selectedMetricLabel;
 				chart.options.scales.y.title.text = selectedPartyLabel;
-				chart.options.plugins.tooltip.callbacks.label = function (
-					context: any
-				) {
-					const index = context.dataIndex;
-					const datasetIndex = context.datasetIndex;
-					if (datasetIndex === 0 && currentTooltipLabels[index]) {
-						const pointLabel = currentTooltipLabels[index];
-						const x = context.parsed.x.toLocaleString(undefined, {
-							maximumFractionDigits: 2,
-						});
-						const y = context.parsed.y.toLocaleString(undefined, {
-							maximumFractionDigits: 2,
-						});
-						return [
-							pointLabel,
-							`${selectedMetricLabel}: ${x}`,
-							`${selectedPartyLabel}: ${y}%`,
-						]; // Use updated labels
-					}
-					return null;
-				};
-				chart.update(); // Perform chart update
+				chart.options.plugins.tooltip.callbacks.label =
+					tooltipLabelCallback;
+				// Update font sizes
+				chart.options.plugins.title.font.size = fontSizes.titleSize;
+				chart.options.scales.x.title.font.size =
+					fontSizes.axisTitleSize;
+				chart.options.scales.y.title.font.size =
+					fontSizes.axisTitleSize;
+				chart.options.scales.x.ticks.font.size = fontSizes.tickSize;
+				chart.options.scales.y.ticks.font.size = fontSizes.tickSize;
+				chart.options.plugins.tooltip.titleFont.size =
+					fontSizes.tooltipTitleSize;
+				chart.options.plugins.tooltip.bodyFont.size =
+					fontSizes.tooltipBodySize;
+
+				chart.update("none");
+				applyHighlight();
 			} else {
-				// console.log("Scatter: Creating new chart instance.");
 				const ctx = canvas.getContext("2d");
 				if (!ctx) throw new Error("Could not get canvas context.");
 				chart = new window.Chart(ctx, {
@@ -380,12 +459,16 @@
 					data: { datasets },
 					options: {
 						responsive: true,
-						maintainAspectRatio: true,
-						aspectRatio: compact ? 1.2 : 1.6,
-						animation: { duration: 400 },
+						maintainAspectRatio: false,
+						animation: { duration: 0 },
+						layout: {
+							padding: compact
+								? { top: 5, right: 5, bottom: 5, left: 0 }
+								: { top: 10, right: 15, bottom: 5, left: 5 },
+						},
 						interaction: {
 							mode: "nearest",
-							intersect: true,
+							intersect: false,
 							axis: "xy",
 						},
 						plugins: {
@@ -395,9 +478,10 @@
 								backgroundColor: "rgba(0, 0, 0, 0.8)",
 								titleColor: "#ffffff",
 								bodyColor: "#ffffff",
-								borderColor: "rgba(0,0,0,0.1)",
+								borderColor: "rgba(255,255,255,0.1)",
 								borderWidth: 1,
-								padding: 10,
+								padding: compact ? 6 : 8,
+								cornerRadius: 3,
 								displayColors: false,
 								titleFont: {
 									weight: "bold",
@@ -405,46 +489,20 @@
 								},
 								bodyFont: { size: fontSizes.tooltipBodySize },
 								callbacks: {
-									label: function (context: any) {
-										const index = context.dataIndex;
-										const datasetIndex =
-											context.datasetIndex;
-										if (
-											datasetIndex === 0 &&
-											currentTooltipLabels[index]
-										) {
-											const pointLabel =
-												currentTooltipLabels[index];
-											const x =
-												context.parsed.x.toLocaleString(
-													undefined,
-													{ maximumFractionDigits: 2 }
-												);
-											const y =
-												context.parsed.y.toLocaleString(
-													undefined,
-													{ maximumFractionDigits: 2 }
-												);
-											return [
-												pointLabel,
-												`${selectedMetricLabel}: ${x}`,
-												`${selectedPartyLabel}: ${y}%`,
-											];
-										}
-										return null;
-									},
+									label: tooltipLabelCallback,
 								},
 							},
 							title: {
 								display: !compact && !!chartTitleText,
 								text: chartTitleText,
-								padding: { top: 10, bottom: 20 },
+								align: "start",
+								padding: { top: 0, bottom: compact ? 10 : 15 },
 								font: {
 									size: fontSizes.titleSize,
-									weight: "bold",
-									family: "'Inter', sans-serif",
+									weight: "500",
+									family: "system-ui, sans-serif",
 								},
-								color: "#333333",
+								color: "#111827",
 							},
 						},
 						scales: {
@@ -456,33 +514,19 @@
 									text: selectedMetricLabel,
 									font: {
 										size: fontSizes.axisTitleSize,
-										family: "'Inter', sans-serif",
+										family: "system-ui, sans-serif",
+										weight: "400",
 									},
-									color: "#555555",
-									padding: { top: 10 },
+									color: "#4B5563",
+									padding: { top: compact ? 4 : 8 },
 								},
-								grid: { color: "#eeeeee" },
-								border: { color: "#dddddd" },
+								grid: { color: "#E5E7EB", drawBorder: false },
 								ticks: {
-									color: "#666666",
+									color: "#6B7280",
 									font: { size: fontSizes.tickSize },
-									callback: function (value: any) {
-										const numValue = Number(value);
-										if (isNaN(numValue)) return value;
-										if (
-											currentMetric.includes("price") ||
-											currentMetric.includes("income")
-										) {
-											return numValue >= 1000
-												? (numValue / 1000).toFixed(0) +
-														"k"
-												: numValue.toLocaleString();
-										}
-										return numValue.toLocaleString(
-											undefined,
-											{ maximumFractionDigits: 1 }
-										);
-									},
+									maxTicksLimit: compact ? 4 : 6,
+									padding: 5,
+									callback: formatXAxisTick,
 								},
 							},
 							y: {
@@ -494,19 +538,19 @@
 									text: selectedPartyLabel,
 									font: {
 										size: fontSizes.axisTitleSize,
-										family: "'Inter', sans-serif",
+										family: "system-ui, sans-serif",
+										weight: "400",
 									},
-									color: "#555555",
-									padding: { bottom: 10 },
+									color: "#4B5563",
+									padding: { bottom: compact ? 4 : 8 },
 								},
-								grid: { color: "#eeeeee" },
-								border: { color: "#dddddd" },
+								grid: { color: "#E5E7EB", drawBorder: false },
 								ticks: {
-									color: "#666666",
+									color: "#6B7280",
 									font: { size: fontSizes.tickSize },
-									callback: function (value: any) {
-										return value + "%";
-									},
+									maxTicksLimit: compact ? 4 : 6,
+									padding: 5,
+									callback: formatYAxisTick,
 								},
 							},
 						},
@@ -524,22 +568,38 @@
 										currentTooltipLabels[index]
 									);
 								}
-							} // Dispatch event
+							}
 						},
 					},
 				});
-				// Hide placeholder, show canvas after creation
-				placeholderElement.style.display = "none";
-				canvas.style.display = "block";
-				isLoading = false; // Set loading false after initial creation
+				applyHighlight();
 			}
 
 			// Update stats text area
-			statsText = `<div class="text-center text-gray-600 text-sm"><span class="font-medium">Pearson correlation (r):</span> ${pearsonR.toFixed(3)}<span class="mx-2">|</span><span class="font-medium">R²:</span> ${rSquared.toFixed(3)}<span class="mx-2">|</span><span class="font-medium">Constituencies:</span> ${n.toLocaleString()}</div>`;
+			if (!isNaN(pearsonR)) {
+				statsText = `
+					<div class="text-center text-gray-600 text-xs px-2">
+						Correlation (r): <span class="font-medium ${Math.abs(pearsonR) > 0.5 ? "text-blue-700" : Math.abs(pearsonR) > 0.2 ? "text-blue-600" : "text-gray-700"}">${pearsonR.toFixed(2)}</span>
+						<span class="mx-1.5 text-gray-300">|</span>
+						R²: <span class="font-medium ${rSquared > 0.25 ? "text-blue-700" : rSquared > 0.04 ? "text-blue-600" : "text-gray-700"}">${rSquared.toFixed(2)}</span>
+						<span class="mx-1.5 text-gray-300">|</span>
+						N: ${n.toLocaleString()}
+					</div>
+				`;
+			} else if (statPoints.length < 5 && n > 0) {
+				// Check n > 0 as well
+				statsText = `<div class="text-center text-gray-500 text-xs px-2 italic">N=${n.toLocaleString()} (Not enough data for correlation)</div>`;
+			} else {
+				statsText = `<div class="text-center text-gray-500 text-xs px-2 italic">Correlation not calculated</div>`;
+			}
+
+			placeholderElement.style.display = "none";
+			canvas.style.display = "block";
+			isLoading = false;
 		} catch (e: any) {
-			console.error("Chart update error:", e);
+			console.error("Scatter: Chart update error:", e);
 			errorMessage = `Chart Error: ${e.message}`;
-			placeholderElement.textContent = errorMessage;
+			placeholderElement.innerHTML = `<p class="text-sm text-red-600 p-4">${errorMessage}</p>`;
 			placeholderElement.style.display = "flex";
 			canvas.style.display = "none";
 			statsText = "";
@@ -548,135 +608,181 @@
 			if (chart) {
 				chart.destroy();
 				chart = null;
-			} // Destroy if error occurred during update
-			isLoading = false; // Ensure loading is off on error
+			}
+			isLoading = false;
 		}
 	}
 
 	// --- Resize handler ---
 	const handleResize = debounce(() => {
-		if (!chart || !chartContainer || !isMounted) return;
-		chart.resize();
+		if (!chart || !chartContainer || !isMounted || !window.Chart) return;
 		const newWidth = chartContainer.clientWidth;
 		const newFontSizes = getResponsiveFontSizes(newWidth);
-		if (chart.options?.plugins?.title?.font) {
+		let optionsChanged = false;
+
+		// Update font sizes if they differ
+		if (
+			chart.options?.plugins?.title?.font &&
+			chart.options.plugins.title.font.size !== newFontSizes.titleSize
+		) {
 			chart.options.plugins.title.font.size = newFontSizes.titleSize;
+			optionsChanged = true;
 		}
-		if (chart.options?.scales?.x?.title?.font) {
+		if (
+			chart.options?.scales?.x?.title?.font &&
+			chart.options.scales.x.title.font.size !==
+				newFontSizes.axisTitleSize
+		) {
 			chart.options.scales.x.title.font.size = newFontSizes.axisTitleSize;
+			optionsChanged = true;
 		}
-		if (chart.options?.scales?.y?.title?.font) {
+		if (
+			chart.options?.scales?.y?.title?.font &&
+			chart.options.scales.y.title.font.size !==
+				newFontSizes.axisTitleSize
+		) {
 			chart.options.scales.y.title.font.size = newFontSizes.axisTitleSize;
+			optionsChanged = true;
 		}
-		if (chart.options?.scales?.x?.ticks?.font) {
+		if (
+			chart.options?.scales?.x?.ticks?.font &&
+			chart.options.scales.x.ticks.font.size !== newFontSizes.tickSize
+		) {
 			chart.options.scales.x.ticks.font.size = newFontSizes.tickSize;
+			optionsChanged = true;
 		}
-		if (chart.options?.scales?.y?.ticks?.font) {
+		if (
+			chart.options?.scales?.y?.ticks?.font &&
+			chart.options.scales.y.ticks.font.size !== newFontSizes.tickSize
+		) {
 			chart.options.scales.y.ticks.font.size = newFontSizes.tickSize;
+			optionsChanged = true;
 		}
-		if (chart.options?.plugins?.tooltip?.titleFont) {
+		if (
+			chart.options?.plugins?.tooltip?.titleFont &&
+			chart.options.plugins.tooltip.titleFont.size !==
+				newFontSizes.tooltipTitleSize
+		) {
 			chart.options.plugins.tooltip.titleFont.size =
 				newFontSizes.tooltipTitleSize;
+			optionsChanged = true;
 		}
-		if (chart.options?.plugins?.tooltip?.bodyFont) {
+		if (
+			chart.options?.plugins?.tooltip?.bodyFont &&
+			chart.options.plugins.tooltip.bodyFont.size !==
+				newFontSizes.tooltipBodySize
+		) {
 			chart.options.plugins.tooltip.bodyFont.size =
 				newFontSizes.tooltipBodySize;
+			optionsChanged = true;
 		}
-		chart.update("none");
+
+		if (optionsChanged) {
+			chart.update("none");
+		}
 	}, 150);
 
 	// --- Lifecycle ---
 	onMount(async () => {
+		isMounted = true;
 		isLoading = true;
-		errorMessage = null; // Set loading true initially
-		placeholderElement.innerHTML = `... Loading Chart ...`;
+		errorMessage = null;
+
+		placeholderElement.innerHTML = `
+			<div class="flex flex-col items-center justify-center text-center p-4">
+				 <svg class="animate-spin h-6 w-6 text-blue-600 mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+					<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+					<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+				</svg>
+				<p class="text-gray-500 text-xs font-medium">Loading Chart...</p>
+			</div>`;
 		placeholderElement.style.display = "flex";
 		canvas.style.display = "none";
 
 		try {
-			// Load libraries ONCE
 			await loadChartLibraries();
-			ss = await import("simple-statistics");
-			if (typeof ss?.linearRegression !== "function") {
-				throw new Error("Statistics library failed to load correctly.");
-			}
-
-			isMounted = true; // Set mounted flag AFTER libraries are loaded
-			await updateChart(); // Initial draw uses initial prop values
+			await updateChart(); // Initial chart render
 
 			resizeObserver = new ResizeObserver(handleResize);
 			if (chartContainer) {
 				resizeObserver.observe(chartContainer);
 			}
 		} catch (err: any) {
-			console.error("Initialization failed:", err);
-			errorMessage = `Initialization Error: ${err.message}. Please try refreshing.`;
-			placeholderElement.textContent = errorMessage;
+			console.error("Scatter: Initialization failed:", err);
+			errorMessage = `Initialization Error: ${err.message}.`;
+			placeholderElement.innerHTML = `<p class="text-sm text-red-600 p-4">${errorMessage}</p>`;
 			isLoading = false;
 			isMounted = false;
 		}
 	});
 
 	onDestroy(() => {
-		if (resizeObserver) {
-			resizeObserver.disconnect();
+		isMounted = false;
+		if (resizeObserver && chartContainer) {
+			resizeObserver.unobserve(chartContainer);
 		}
+		resizeObserver = null;
 		if (chart) {
 			chart.destroy();
+			chart = null;
 		}
-		isMounted = false;
 		currentPlotPoints = [];
 		currentTooltipLabels = [];
+		console.log("Scatter: Destroyed.");
 	});
 
 	// --- Reactive updates based on PROP changes ---
-	const debouncedUpdateChart = debounce(updateChart, 150); // Debounce updateChart directly
+	const debouncedUpdateChart = debounce(updateChart, 200);
 
-	// Use reactive statements ($:) to trigger the debounced update
-	// Only trigger if the actual prop values have changed since the last update
 	$: if (
 		isMounted &&
-		(selectedParty !== prevSelectedParty ||
-			selectedMetric !== prevSelectedMetric ||
-			data?.length !== prevDataLength)
+		typeof window.Chart === "function" &&
+		typeof ss?.linearRegression === "function"
 	) {
-		// console.log("Scatter: Props changed, queueing chart update", { selectedParty, selectedMetric });
-		debouncedUpdateChart();
-		// Update previous values *after* queuing the update
-		prevSelectedParty = selectedParty;
-		prevSelectedMetric = selectedMetric;
-		prevDataLength = data?.length ?? 0;
+		if (
+			selectedParty !== prevSelectedParty ||
+			selectedMetric !== prevSelectedMetric ||
+			data?.length !== prevDataLength
+		) {
+			debouncedUpdateChart();
+			prevSelectedParty = selectedParty;
+			prevSelectedMetric = selectedMetric;
+			prevDataLength = data?.length ?? 0;
+		}
 	}
 
-	// Separate reactive block for highlight changes (doesn't require full redraw)
+	// Apply highlight reactively
 	$: if (isMounted && chart && highlightedConstituency !== prevHighlight) {
-		// console.log("Scatter: Highlight prop changed:", highlightedConstituency);
 		applyHighlight();
-		prevHighlight = highlightedConstituency; // Update previous highlight value
+		prevHighlight = highlightedConstituency;
 	}
 </script>
 
 <!-- HTML Template -->
 <div
-	class="font-sans bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden {compact
-		? 'p-3'
-		: 'p-4 sm:p-5'}"
+	class="font-sans bg-white rounded-lg border border-gray-200/75 {compact
+		? 'p-2'
+		: 'p-3 sm:p-4'}"
 >
-	<!-- Chart Controls Section REMOVED -->
-	<!-- Search Input & Reset Button REMOVED -->
-
 	<!-- Chart Area Container -->
 	<div
 		bind:this={chartContainer}
-		class="relative w-full mx-auto bg-gray-50 rounded border border-gray-100 overflow-hidden shadow-inner mb-4"
-		style="max-width: 800px;"
+		class="relative w-full mx-auto bg-gray-50/30 rounded border border-gray-200/60 overflow-hidden mb-2 sm:mb-3"
+		style:min-height={compact ? "280px" : "350px"}
+		style:aspect-ratio={compact ? "1 / 1" : "16 / 10"}
+		style:max-height={compact ? "350px" : "500px"}
 	>
-		<canvas bind:this={canvas} style="display: none;"></canvas>
+		<canvas
+			bind:this={canvas}
+			class="absolute inset-0 w-full h-full"
+			style="display: none;"
+		></canvas>
 		<div
 			bind:this={placeholderElement}
-			class="absolute inset-0 flex items-center justify-center text-center p-4 bg-white/90 z-10"
+			class="absolute inset-0 flex items-center justify-center text-center p-4 bg-white/80 z-10 transition-opacity duration-150"
 			style:display={isLoading || errorMessage ? "flex" : "none"}
-			class:text-red-600={!!errorMessage}
+			class:opacity-100={isLoading || errorMessage}
+			class:opacity-0={!isLoading && !errorMessage}
 			aria-live="polite"
 		>
 			<!-- Content set dynamically -->
@@ -684,31 +790,24 @@
 	</div>
 
 	<!-- Stats Display Area -->
-	<div bind:this={statsElement} class="py-3 text-center min-h-[20px]">
-		{@html statsText}
+	<div
+		bind:this={statsElement}
+		class="py-1.5 text-center min-h-[24px] bg-gray-100/60 rounded border border-gray-200/50 mb-3"
+	>
+		{@html statsText ||
+			'<div class="text-xs text-gray-400 italic px-2">...</div>'}
 	</div>
 
 	<!-- Sources and Notes Section -->
 	{#if !compact}
-		<div class="mt-2 pt-3 border-t border-gray-100 text-xs text-gray-500">
-			<div class="flex flex-wrap gap-x-4 gap-y-1 justify-between">
-				<div class="flex-1 min-w-[200px]">
-					<span class="font-medium">Notes:</span> SEISA (2021)
-					combines qualifications and occupation. IMD (2020) measures
-					deprivation across income, employment, education, health,
-					crime, housing, and environment. <br /> <br />Correlation
-					(r) measures linear association (-1 to 1). R² indicates
-					proportion of variance explained (0 to 1). Chart excludes
-					constituencies with 0% party voteshare or 0 metric value for
-					correlation calculation.
-				</div>
-				<div class="flex-1 min-w-[200px] text-right">
-					<span class="font-medium">Data Sources:</span> House of Commons
-					Library (2024), Census (2021/22), MySociety, HESA, End Child
-					Poverty Coalition (2022/23). Map tiles &copy; Mapbox &copy; OpenStreetMap
-					contributors.
-				</div>
-			</div>
+		<div
+			class="mt-2 pt-2 border-t border-gray-100 text-[11px] text-gray-500 space-y-1.5"
+		>
+			<p>
+				<span class="font-medium text-gray-600">Notes:</span>
+				IMD = Index of Multiple Deprivation (2019/20). SEISA = Skills and
+				Employment (2021). Click points to highlight.
+			</p>
 		</div>
 	{/if}
 </div>

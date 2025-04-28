@@ -19,6 +19,7 @@ export interface PartyOption {
 }
 
 // --- Configuration ---
+// MODIFIED: Darker party colors
 export const parties: PartyOption[] = [
 	{ value: "con_voteshare", label: "Conservative Voteshare 2024 (%)" },
 	{ value: "lab_voteshare", label: "Labour Voteshare 2024 (%)" },
@@ -28,7 +29,6 @@ export const parties: PartyOption[] = [
 	{ value: "oth_voteshare", label: "Other Voteshare 2024 (%)" },
 ];
 
-// --- MODIFIED: Added aggregated age groups and reordered ---
 export const metrics: MetricOption[] = [
 	// Group: Deprivation (IMD/SEISA) - Importance #1
 	{
@@ -54,7 +54,7 @@ export const metrics: MetricOption[] = [
 	// Group: Economic - Importance #2
 	{
 		value: "child_poverty_percentage_22_23",
-		label: "Child Poverty % (22/23)", // Direct poverty measure
+		label: "Child Poverty %", // Direct poverty measure
 		group: "Economic",
 	},
 	{
@@ -232,15 +232,16 @@ export const metrics: MetricOption[] = [
 	},
 ];
 
+// MODIFIED: Darker party colors
 export const partyColors: { [key: string]: string } = {
-	con_voteshare: "#0087DC", // Conservative Blue
-	lab_voteshare: "#E4003B", // Labour Red
-	ld_voteshare: "#FAA61A", // Lib Dem Gold
-	ref_voteshare: "#12B6CF", // Reform UK Teal
-	green_voteshare: "#6AB023", // Green Party Green
-	snp_voteshare: "#FFF95D", // SNP Yellow
-	pc_voteshare: "#008142", // Plaid Cymru Green
-	oth_voteshare: "#6B7280", // Neutral Gray for Other
+	con_voteshare: "#00538C", // Darker Conservative Blue
+	lab_voteshare: "#C7002F", // Darker Labour Red
+	ld_voteshare: "#EAA000", // Darker Lib Dem Gold
+	ref_voteshare: "#0A8AA0", // Darker Reform UK Teal
+	green_voteshare: "#528D1C", // Darker Green Party Green
+	snp_voteshare: "#FDF34B", // Slightly adjusted SNP Yellow
+	pc_voteshare: "#006131", // Darker Plaid Cymru Green
+	oth_voteshare: "#52525B", // Darker Neutral Gray for Other
 };
 
 // --- Derived Data ---
@@ -260,12 +261,21 @@ export function getGroupedMetrics(
 			.get(group)
 			?.push({ value: metric.value, label: metric.label });
 	});
-	// Optional: Sort groups alphabetically for display in dropdowns etc.
-	return new Map(
-		[...newGroupedMetrics.entries()].sort((a, b) =>
-			a[0].localeCompare(b[0])
-		)
-	);
+	// Keep original order from the metrics array
+	const orderedMap = new Map<string, { value: string; label: string }[]>();
+	const groupOrder: string[] = [];
+	metricList.forEach((metric) => {
+		const group = metric.group || "Other";
+		if (!groupOrder.includes(group)) {
+			groupOrder.push(group);
+		}
+	});
+	groupOrder.forEach((groupName) => {
+		if (newGroupedMetrics.has(groupName)) {
+			orderedMap.set(groupName, newGroupedMetrics.get(groupName)!);
+		}
+	});
+	return orderedMap;
 }
 
 export const groupedMetrics = getGroupedMetrics(metrics);
