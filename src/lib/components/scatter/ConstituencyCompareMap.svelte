@@ -11,6 +11,7 @@
 		ErrorEvent,
 		MapDataEvent,
 		MapMouseEvent,
+		Popup, // Import Popup
 	} from "maplibre-gl";
 
 	import { browser } from "$app/environment";
@@ -35,7 +36,7 @@
 	export let metrics: MetricOption[] = [];
 	export let parties: PartyOption[] = [];
 	export let partyColors: { [key: string]: string } = {};
-	export let mapboxAccessToken: string;
+	export let mapboxAccessToken: string; // Keep prop name for compatibility if needed elsewhere
 	export let mapIdLeft: string =
 		"compare-map-left-" + Math.random().toString(36).substring(2, 9);
 	export let mapIdRight: string =
@@ -52,19 +53,11 @@
 	let mapsInitialized = false;
 	let sourcesAndLayersAdded = false;
 	let isMapReadyForData = false;
-	let updateCounter = 0; // Track update attempts
-
-	// Debug flags
-	let sourceLeftLoaded = false;
-	let sourceRightLoaded = false;
-	let layersLeftAdded = false;
-	let layersRightAdded = false;
-	let leftDataApplied = false;
-	let rightDataApplied = false;
 
 	// --- Variables to hold dynamically imported modules/classes ---
 	let maplibregl: typeof import("maplibre-gl") | null = null;
 	let MaplibreCompare: any = null;
+	let MaplibrePopup: typeof Popup | null = null; // For Popup class
 
 	// Legend state
 	let leftLabel: string = "";
@@ -73,6 +66,12 @@
 	let rightLabel: string = "";
 	let rightMinValue: number | null = null;
 	let rightMaxValue: number | null = null;
+
+	// Hover state
+	let leftPopup: Popup | null = null;
+	let rightPopup: Popup | null = null;
+	let hoveredLeftId: string | number | null = null;
+	let hoveredRightId: string | number | null = null;
 
 	// Tracking previous values
 	let prevSelectedParty = selectedParty;
@@ -86,7 +85,8 @@
 	const SOURCE_ID_RIGHT = "constituencies-source-right";
 	const LAYER_ID_RIGHT = "constituency-fills-right";
 	const SOURCE_LAYER = "uk-constituencies";
-	const FEATURE_ID_PROPERTY = "PCON24CD";
+	const FEATURE_ID_PROPERTY = "PCON24CD"; // ID property in vector tiles
+	const FEATURE_NAME_PROPERTY = "PCON24NM"; // Name property in vector tiles
 	const NO_DATA_COLOR = "#e0e0e0";
 
 	// --- Map Initialization Options ---
@@ -113,23 +113,43 @@
 		return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
 	}
 
-	// --- IMPROVED: Add Source and Layer with detailed logging ---
+	// --- formatLegendLabel helper (MODIFIED) ---
+	function formatLegendLabel(value: number | null, label: string): string {
+		if (value === null || value === undefined) return "N/A";
+		const numValue = Number(value);
+		if (isNaN(numValue)) return "N/A";
+		// Use the provided label for context
+		if (label.includes("(%)") || label.includes("Voteshare")) {
+			// Handle potential 0-1 range if label doesn't explicitly have % but implies it
+			if (numValue >= 0 && numValue <= 1 && !label.includes("%")) {
+				return `${(numValue * 100).toFixed(1)}%`;
+			}
+			return `${numValue.toFixed(1)}%`;
+		}
+		if (label.includes("(£)")) {
+			return numValue >= 1000
+				? `£${(numValue / 1000).toFixed(0)}k`
+				: `£${numValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+		}
+		if (Math.abs(numValue) < 1 && numValue !== 0)
+			return numValue.toFixed(2);
+		if (Math.abs(numValue) < 10) return numValue.toFixed(1);
+		if (Math.abs(numValue) >= 10000)
+			return (numValue / 1000).toFixed(0) + "k";
+		return numValue.toLocaleString(undefined, { maximumFractionDigits: 0 });
+	}
+
+	// --- Add Source and Layer (Reduced Logging) ---
 	async function addSourceAndLayer(
 		mapInstance: MaplibreMap,
 		sourceId: string,
 		layerId: string
 	): Promise<void> {
-		console.log(
-			`[DEBUG] Starting addSourceAndLayer for ${sourceId}/${layerId}`
-		);
-
+		// console.log(`Starting addSourceAndLayer for ${sourceId}/${layerId}`);
 		return new Promise((resolve, reject) => {
 			try {
-				// First check if the source already exists
 				if (!mapInstance.getSource(sourceId)) {
-					console.log(
-						`[DEBUG] Adding vector tile source ${sourceId}`
-					);
+					// console.log(`Adding vector tile source ${sourceId}`);
 					mapInstance.addSource(sourceId, {
 						type: "vector",
 						tiles: [
@@ -140,65 +160,28 @@
 						maxzoom: 17,
 					});
 
-					// Log source information after adding
-					console.log(
-						`[DEBUG] Source ${sourceId} added to map, waiting for tiles...`
-					);
-
-					// Listen for the source to load
 					const checkSourceLoaded = (e: MapDataEvent) => {
 						if (e.sourceId === sourceId && e.isSourceLoaded) {
-							console.log(
-								`[DEBUG] Source ${sourceId} loaded via event!`
-							);
+							// console.log(`Source ${sourceId} loaded via event!`);
 							mapInstance.off("sourcedata", checkSourceLoaded);
-
-							if (sourceId === SOURCE_ID_LEFT) {
-								sourceLeftLoaded = true;
-							} else if (sourceId === SOURCE_ID_RIGHT) {
-								sourceRightLoaded = true;
-							}
-
 							addLayersAndResolve();
 						}
 					};
-
 					mapInstance.on("sourcedata", checkSourceLoaded);
 
-					// Check if source is already loaded
 					if (mapInstance.isSourceLoaded(sourceId)) {
-						console.log(
-							`[DEBUG] Source ${sourceId} was loaded immediately`
-						);
+						// console.log(`Source ${sourceId} was loaded immediately`);
 						mapInstance.off("sourcedata", checkSourceLoaded);
-
-						if (sourceId === SOURCE_ID_LEFT) {
-							sourceLeftLoaded = true;
-						} else if (sourceId === SOURCE_ID_RIGHT) {
-							sourceRightLoaded = true;
-						}
-
 						addLayersAndResolve();
 					}
 				} else {
-					console.log(
-						`[DEBUG] Source ${sourceId} already exists, proceeding to layers`
-					);
-
-					if (sourceId === SOURCE_ID_LEFT) {
-						sourceLeftLoaded = true;
-					} else if (sourceId === SOURCE_ID_RIGHT) {
-						sourceRightLoaded = true;
-					}
-
+					// console.log(`Source ${sourceId} already exists, proceeding to layers`);
 					addLayersAndResolve();
 				}
 
 				function addLayersAndResolve() {
 					if (!mapInstance.getLayer(layerId)) {
-						console.log(
-							`[DEBUG] Adding main fill layer ${layerId}`
-						);
+						// console.log(`Adding main fill layer ${layerId}`);
 						mapInstance.addLayer({
 							id: layerId,
 							type: "fill",
@@ -207,22 +190,11 @@
 							paint: {
 								"fill-color": NO_DATA_COLOR,
 								"fill-opacity": 0.75,
-								"fill-outline-color": [
-									"case",
-									[
-										"boolean",
-										["feature-state", "highlighted"],
-										false,
-									],
-									"#000000",
-									"rgba(0,0,0,0.1)",
-								],
+								"fill-outline-color": "rgba(0,0,0,0.1)", // Simplified outline
 							},
 						});
 
-						console.log(
-							`[DEBUG] Adding outline layer ${layerId}-highlight-outline`
-						);
+						// console.log(`Adding outline layer ${layerId}-highlight-outline`);
 						mapInstance.addLayer({
 							id: `${layerId}-highlight-outline`,
 							type: "line",
@@ -231,88 +203,22 @@
 							paint: {
 								"line-color": "#000000",
 								"line-width": 2.5,
-								"line-opacity": [
-									"case",
-									[
-										"boolean",
-										["feature-state", "highlighted"],
-										false,
-									],
-									1,
-									0,
-								],
+								"line-opacity": 0, // Initially hidden
 							},
+							filter: ["==", FEATURE_ID_PROPERTY, ""], // Initially filter out everything
 						});
-
-						if (layerId === LAYER_ID_LEFT) {
-							layersLeftAdded = true;
-						} else if (layerId === LAYER_ID_RIGHT) {
-							layersRightAdded = true;
-						}
 					} else {
-						console.log(`[DEBUG] Layer ${layerId} already exists`);
-
-						if (layerId === LAYER_ID_LEFT) {
-							layersLeftAdded = true;
-						} else if (layerId === LAYER_ID_RIGHT) {
-							layersRightAdded = true;
-						}
+						// console.log(`Layer ${layerId} already exists`);
 					}
-
-					// Test for feature states with a sample feature
-					try {
-						const features = mapInstance.querySourceFeatures(
-							sourceId,
-							{
-								sourceLayer: SOURCE_LAYER,
-								limit: 1,
-							}
-						);
-
-						if (features.length > 0) {
-							const testId =
-								features[0].id ||
-								features[0].properties?.[FEATURE_ID_PROPERTY];
-							console.log(
-								`[DEBUG] Found test feature with ID: ${testId}`
-							);
-
-							if (testId) {
-								// Test setting a feature state
-								mapInstance.setFeatureState(
-									{
-										source: sourceId,
-										sourceLayer: SOURCE_LAYER,
-										id: testId,
-									},
-									{ testValue: 1, _timestamp: Date.now() }
-								);
-								console.log(
-									`[DEBUG] Test feature state set for ${testId}`
-								);
-							}
-						} else {
-							console.warn(
-								`[DEBUG] No test features found for ${sourceId}`
-							);
-						}
-					} catch (e) {
-						console.warn(
-							`[DEBUG] Error testing feature state: ${e.message}`
-						);
-					}
-
-					console.log(
-						`[DEBUG] Resolving addSourceAndLayer for ${layerId}`
-					);
+					// console.log(`Resolving addSourceAndLayer for ${layerId}`);
 					resolve();
 				}
 
-				// Safety timeout - shorter timeout for faster detection of issues
+				// Safety timeout
 				setTimeout(() => {
 					if (!mapInstance.getSource(sourceId)) {
 						console.error(
-							`[DEBUG] Source ${sourceId} failed to load within timeout!`
+							`Source ${sourceId} failed to load within timeout!`
 						);
 						reject(
 							new Error(
@@ -321,14 +227,14 @@
 						);
 					} else if (!mapInstance.getLayer(layerId)) {
 						console.warn(
-							`[DEBUG] Adding layers for ${layerId} via timeout fallback`
+							`Adding layers for ${layerId} via timeout fallback`
 						);
-						addLayersAndResolve();
+						addLayersAndResolve(); // Attempt to add layers anyway
 					}
-				}, 3000);
+				}, 5000); // Slightly longer timeout
 			} catch (error) {
 				console.error(
-					`[DEBUG] Critical error in addSourceAndLayer for ${layerId}:`,
+					`Critical error in addSourceAndLayer for ${layerId}:`,
 					error
 				);
 				reject(error);
@@ -336,93 +242,47 @@
 		});
 	}
 
-	// --- IMPROVED: Helper to update feature states with detailed logging ---
+	// --- Helper to update feature states (Reduced Logging) ---
 	function updateFeatureStates(
 		mapInstance: MaplibreMap | null,
 		sourceId: string,
 		variableKey: string,
 		variableType: "party" | "metric"
 	): boolean {
-		console.log(
-			`[DEBUG] updateFeatureStates for ${sourceId}, key: ${variableKey}, type: ${variableType}`
-		);
-
-		if (!mapInstance) {
-			console.warn(
-				`[DEBUG] updateFeatureStates: mapInstance is null for ${sourceId}`
-			);
+		// console.log(`updateFeatureStates for ${sourceId}, key: ${variableKey}, type: ${variableType}`);
+		if (!mapInstance || !mapInstance.isStyleLoaded()) {
+			// console.warn(`updateFeatureStates: map or style not ready for ${sourceId}`);
 			return false;
 		}
-
-		if (!mapInstance.isStyleLoaded()) {
-			console.warn(
-				`[DEBUG] updateFeatureStates: style not loaded for ${sourceId}`
-			);
-			return false;
-		}
-
 		if (!mapInstance.getSource(sourceId)) {
-			console.warn(
-				`[DEBUG] updateFeatureStates: source ${sourceId} not found`
-			);
+			// console.warn(`updateFeatureStates: source ${sourceId} not found`);
+			return false;
+		}
+		if (!data || data.length === 0 || !variableKey) {
+			// console.warn(`updateFeatureStates: no data or variableKey`);
 			return false;
 		}
 
-		if (!data || data.length === 0) {
-			console.warn(
-				`[DEBUG] updateFeatureStates: no data available (length: ${data?.length || 0})`
-			);
-			return false;
-		}
-
-		if (!variableKey) {
-			console.warn(
-				`[DEBUG] updateFeatureStates: no variableKey provided`
-			);
-			return false;
-		}
-
-		console.log(
-			`[DEBUG] Processing ${data.length} data points for ${sourceId}`
-		);
-
-		// Include 0 in the calculation for min/max
 		const validValues: number[] = [];
 		const featureData: {
 			[code: string]: { value: number | null; name: string };
 		} = {};
 
-		// First pass to collect data
 		data.forEach((d) => {
 			const code = d.const_code;
 			const name = d.constituency_name;
 			if (!code || !name) return;
-
 			const value = getNumericValue(d, variableKey);
 			featureData[code] = { value, name };
-
-			// Condition changed to value >= 0
 			if (value !== null && isFinite(value) && value >= 0) {
 				validValues.push(value);
 			}
 		});
 
-		console.log(
-			`[DEBUG] Found ${Object.keys(featureData).length} valid constituencies with codes`
-		);
-		console.log(
-			`[DEBUG] Found ${validValues.length} constituencies with numeric values >= 0`
-		);
-
-		// Calculate Min/Max from valid, non-negative values
 		const currentMinValue =
 			validValues.length > 0 ? Math.min(...validValues) : null;
 		const currentMaxValue =
 			validValues.length > 0 ? Math.max(...validValues) : null;
-
-		console.log(
-			`[DEBUG] Value range: min=${currentMinValue}, max=${currentMaxValue}`
-		);
 
 		// Update legend state variables
 		if (variableType === "party") {
@@ -437,30 +297,17 @@
 			rightMaxValue = currentMaxValue;
 		}
 
-		// Debug: Output several example values
-		const sampleEntries = Object.entries(featureData).slice(0, 5);
-		console.log(
-			`[DEBUG] Sample data (first 5 entries):`,
-			sampleEntries
-				.map(([code, { value, name }]) => `${code}: ${name} = ${value}`)
-				.join(", ")
-		);
-
-		// Set feature states
+		// Set feature states (only need highlight now, value is used by paint)
 		let featuresUpdated = 0;
 		let featuresMissing = 0;
-
-		Object.entries(featureData).forEach(([code, { value, name }]) => {
+		Object.entries(featureData).forEach(([code, { name }]) => {
 			const isHighlighted = name === highlightedConstituency;
-			const finalValue =
-				typeof value === "number" && isFinite(value) ? value : null;
-
 			try {
+				// Check if feature exists before setting state (optional but safer)
 				const features = mapInstance.querySourceFeatures(sourceId, {
 					sourceLayer: SOURCE_LAYER,
 					filter: ["==", FEATURE_ID_PROPERTY, code],
 				});
-
 				if (features.length > 0) {
 					mapInstance.setFeatureState(
 						{
@@ -468,60 +315,37 @@
 							sourceLayer: SOURCE_LAYER,
 							id: code,
 						},
-						{
-							value: finalValue,
-							highlighted: isHighlighted,
-							_updated: Date.now(), // Add timestamp for debugging
-						}
+						{ highlighted: isHighlighted } // Only set highlight state
 					);
 					featuresUpdated++;
 				} else {
 					featuresMissing++;
 				}
 			} catch (e) {
-				console.warn(
-					`[DEBUG] Error setting feature state for ${code}: ${e.message}`
-				);
+				// console.warn(`Error setting feature state for ${code}: ${e.message}`);
 			}
 		});
-
-		console.log(
-			`[DEBUG] Feature states updated: ${featuresUpdated}, missing: ${featuresMissing}`
-		);
-
-		if (variableType === "party") {
-			leftDataApplied = featuresUpdated > 0;
-		} else {
-			rightDataApplied = featuresUpdated > 0;
-		}
-
+		// console.log(`Feature states updated: ${featuresUpdated}, missing: ${featuresMissing}`);
 		return featuresUpdated > 0;
 	}
 
-	// --- IMPROVED: Update paint expression with detailed logging ---
-	// Replace the updatePaintExpression function with this simplified version
+	// --- Update paint expression (Reduced Logging) ---
 	function updatePaintExpression(
 		mapInstance: MaplibreMap | null,
 		layerId: string,
 		variableType: "party" | "metric",
 		variableKey: string
 	) {
-		console.log(
-			`[DEBUG] updatePaintExpression for ${layerId}, key: ${variableKey}, type: ${variableType}`
-		);
-
+		// console.log(`updatePaintExpression for ${layerId}, key: ${variableKey}, type: ${variableType}`);
 		if (
 			!mapInstance ||
 			!mapInstance.isStyleLoaded() ||
 			!mapInstance.getLayer(layerId)
 		) {
-			console.warn(
-				`[DEBUG] updatePaintExpression: conditions not met for ${layerId}`
-			);
+			// console.warn(`updatePaintExpression: conditions not met for ${layerId}`);
 			return;
 		}
 
-		// Get the valid, non-negative data points
 		const values: number[] = [];
 		data.forEach((d) => {
 			const value = getNumericValue(d, variableKey);
@@ -530,20 +354,9 @@
 			}
 		});
 		values.sort((a, b) => a - b);
-		console.log(
-			`[DEBUG] Found ${values.length} valid sorted values for paint calculation`
-		);
 
-		if (values.length > 0) {
-			console.log(
-				`[DEBUG] Value range: min=${values[0]}, max=${values[values.length - 1]}`
-			);
-		}
+		const matchExpression: any[] = ["match", ["id"]]; // Use feature ID directly
 
-		// SUPER SIMPLIFIED: Use a basic "match" expression based on constituency codes
-		const matchExpression: any[] = ["match", ["get", FEATURE_ID_PROPERTY]];
-
-		// Build a map of constituency codes to values
 		const codeToValue: { [code: string]: number } = {};
 		data.forEach((d) => {
 			const code = d.const_code;
@@ -553,14 +366,11 @@
 			}
 		});
 
-		// For quintiles
 		const baseColor =
 			variableType === "party"
 				? partyColors[variableKey] || "#C7002F"
 				: "#225ea8";
-
 		let colorSteps: string[];
-
 		if (variableType === "party") {
 			colorSteps = [
 				lightenColor(baseColor, 0.8),
@@ -569,7 +379,6 @@
 				lightenColor(baseColor, 0.2),
 				baseColor,
 			];
-			console.log(`[DEBUG] Party color steps: ${colorSteps.join(", ")}`);
 		} else {
 			colorSteps = [
 				"#ffffd9",
@@ -578,10 +387,8 @@
 				"#41b6c4",
 				"#225ea8",
 			];
-			console.log(`[DEBUG] Metric color steps: ${colorSteps.join(", ")}`);
 		}
 
-		// Calculate quintile breaks
 		let quintiles: number[] = [];
 		if (values.length >= 5) {
 			const p = (percent: number) => {
@@ -589,17 +396,13 @@
 				return values[index];
 			};
 			quintiles = [p(20), p(40), p(60), p(80)];
-			console.log(`[DEBUG] Quintile values: ${quintiles.join(", ")}`);
 		}
 
-		// Add each constituency code and its color to the match expression
 		Object.entries(codeToValue).forEach(([code, value]) => {
-			let color = NO_DATA_COLOR; // Default
-
+			let color = NO_DATA_COLOR;
 			if (values.length < 2) {
 				color = NO_DATA_COLOR;
 			} else if (values.length < 5) {
-				// Simple gradient for few values
 				if (values[values.length - 1] <= values[0]) {
 					color = lightenColor(baseColor, 0.8);
 				} else {
@@ -613,146 +416,98 @@
 					color = colorSteps[colorIndex];
 				}
 			} else {
-				// Use quintiles
 				if (value < quintiles[0]) color = colorSteps[0];
 				else if (value < quintiles[1]) color = colorSteps[1];
 				else if (value < quintiles[2]) color = colorSteps[2];
 				else if (value < quintiles[3]) color = colorSteps[3];
 				else color = colorSteps[4];
 			}
-
 			matchExpression.push(code, color);
 		});
 
-		// Default case - last element in the match expression
-		matchExpression.push(NO_DATA_COLOR);
-
-		console.log(
-			`[DEBUG] Setting fill-color expression for ${layerId} (Using match syntax)`
-		);
+		matchExpression.push(NO_DATA_COLOR); // Default case
 
 		try {
-			// Set the match expression - this avoids all feature-state issues
 			mapInstance.setPaintProperty(
 				layerId,
 				"fill-color",
 				matchExpression
 			);
-
-			// Set outline colors the simple way
-			mapInstance.setPaintProperty(
-				layerId,
-				"fill-outline-color",
-				"rgba(0,0,0,0.1)" // Simple static outline color
-			);
-
-			console.log(
-				`[DEBUG] Paint properties updated successfully for ${layerId}`
-			);
+			// console.log(`Paint properties updated successfully for ${layerId}`);
 		} catch (error) {
-			console.error(`[DEBUG] Error setting paint for ${layerId}:`, error);
+			console.error(`Error setting paint for ${layerId}:`, error);
 			errorMessage = `Map paint error for ${layerId}: ${error.message}`;
 		}
 
-		// Now set highlight directly in the updateFeatureStates function instead
+		// Update highlight layer filter based on highlightedConstituency
 		try {
+			const highlightLayerId = `${layerId}-highlight-outline`;
 			if (highlightedConstituency) {
-				// Find the constituency code for the highlighted name
 				const highlighted = data.find(
 					(d) => d.constituency_name === highlightedConstituency
 				);
 				if (highlighted?.const_code) {
-					mapInstance.setFilter(`${layerId}-highlight-outline`, [
+					mapInstance.setFilter(highlightLayerId, [
 						"==",
-						["get", FEATURE_ID_PROPERTY],
+						FEATURE_ID_PROPERTY,
 						highlighted.const_code,
 					]);
 					mapInstance.setPaintProperty(
-						`${layerId}-highlight-outline`,
+						highlightLayerId,
 						"line-opacity",
 						1
 					);
+				} else {
+					// Highlighted name not found, clear filter
+					mapInstance.setFilter(highlightLayerId, [
+						"==",
+						FEATURE_ID_PROPERTY,
+						"",
+					]);
+					mapInstance.setPaintProperty(
+						highlightLayerId,
+						"line-opacity",
+						0
+					);
 				}
 			} else {
-				// No highlighting - hide all outlines
-				mapInstance.setFilter(`${layerId}-highlight-outline`, [
+				// No highlight, clear filter
+				mapInstance.setFilter(highlightLayerId, [
 					"==",
-					"const_code",
+					FEATURE_ID_PROPERTY,
 					"",
 				]);
 				mapInstance.setPaintProperty(
-					`${layerId}-highlight-outline`,
+					highlightLayerId,
 					"line-opacity",
 					0
 				);
 			}
 		} catch (e) {
-			console.warn(`[DEBUG] Error setting highlight: ${e.message}`);
+			// console.warn(`Error setting highlight filter: ${e.message}`);
 		}
 	}
 
-	// --- IMPROVED: Main Update Function with detailed logging ---
+	// --- Main Update Function (Reduced Logging) ---
 	function updateCompareMaps(forceUpdate = false) {
-		updateCounter++;
-		console.log(
-			`[DEBUG] updateCompareMaps (#${updateCounter}) ENTRY - force=${forceUpdate}`
-		);
-		console.log(
-			`[DEBUG] Current state: maps=${mapsInitialized}, sources=${sourcesAndLayersAdded}, ready=${isMapReadyForData}`
-		);
-
+		// console.log(`updateCompareMaps ENTRY - force=${forceUpdate}`);
 		if (!mapsInitialized || !sourcesAndLayersAdded || !isMapReadyForData) {
-			console.warn(
-				`[DEBUG] Exiting updateCompareMaps early - conditions not met`
-			);
+			// console.warn(`Exiting updateCompareMaps early - conditions not met`);
 			return;
 		}
-
 		if (!mapLeft || !mapRight) {
-			console.warn(
-				`[DEBUG] Maps not available: left=${!!mapLeft}, right=${!!mapRight}`
-			);
+			// console.warn(`Maps not available: left=${!!mapLeft}, right=${!!mapRight}`);
 			return;
 		}
 
-		console.log(
-			`[DEBUG] Data check: ${data.length} rows, party=${selectedParty}, metric=${selectedMetric}`
-		);
 		errorMessage = null;
 
-		// IMPORTANT: Clear feature states first to avoid stale data
-		try {
-			console.log("[DEBUG] Clearing existing feature states...");
-			// Try to clear all feature states
-			if (mapLeft && mapLeft.getSource(SOURCE_ID_LEFT)) {
-				mapLeft.removeFeatureState({
-					source: SOURCE_ID_LEFT,
-					sourceLayer: SOURCE_LAYER,
-				});
-			}
-			if (mapRight && mapRight.getSource(SOURCE_ID_RIGHT)) {
-				mapRight.removeFeatureState({
-					source: SOURCE_ID_RIGHT,
-					sourceLayer: SOURCE_LAYER,
-				});
-			}
-		} catch (e) {
-			console.warn("[DEBUG] Error clearing feature states:", e);
-		}
-
-		// Update feature states
-		console.log(
-			`[DEBUG] Updating feature states for LEFT with key: ${selectedParty}`
-		);
+		// Update feature states (primarily for highlight now)
 		const stateUpdatedLeft = updateFeatureStates(
 			mapLeft,
 			SOURCE_ID_LEFT,
 			selectedParty,
 			"party"
-		);
-
-		console.log(
-			`[DEBUG] Updating feature states for RIGHT with key: ${selectedMetric}`
 		);
 		const stateUpdatedRight = updateFeatureStates(
 			mapRight,
@@ -761,11 +516,7 @@
 			"metric"
 		);
 
-		// Then update the paint properties
-		console.log(
-			`[DEBUG] Updating paint expressions: left=${stateUpdatedLeft}, right=${stateUpdatedRight}`
-		);
-
+		// Update paint properties
 		if (stateUpdatedLeft || forceUpdate) {
 			updatePaintExpression(
 				mapLeft,
@@ -774,7 +525,6 @@
 				selectedParty
 			);
 		}
-
 		if (stateUpdatedRight || forceUpdate) {
 			updatePaintExpression(
 				mapRight,
@@ -784,27 +534,17 @@
 			);
 		}
 
-		// Force map redraw
-		console.log("[DEBUG] Forcing map redraw to ensure data visibility");
-		mapLeft?.triggerRepaint();
-		mapRight?.triggerRepaint();
+		// Force map redraw if needed (less critical now with match expression)
+		// mapLeft?.triggerRepaint();
+		// mapRight?.triggerRepaint();
 
-		console.log(`[DEBUG] updateCompareMaps (#${updateCounter}) EXIT`);
+		// console.log(`updateCompareMaps EXIT`);
 	}
 
-	// --- Lifecycle: onMount with improved initialization sequence ---
+	// --- Lifecycle: onMount ---
 	onMount(async () => {
-		// Ensure this runs only on the client
-		if (!browser) {
-			console.log(
-				"[DEBUG] Not in browser environment, skipping map initialization"
-			);
-			return;
-		}
-
-		console.log(
-			"[DEBUG] ConstituencyCompareMap: onMount started (client-side)"
-		);
+		if (!browser) return;
+		console.log("ConstituencyCompareMap: onMount started");
 		isLoading = true;
 		mapsInitialized = false;
 		sourcesAndLayersAdded = false;
@@ -812,27 +552,20 @@
 
 		try {
 			// Dynamically import libraries
-			console.log("[DEBUG] Dynamically importing MapLibre GL JS...");
-			maplibregl = (await import("maplibre-gl")).default;
-			console.log("[DEBUG] MapLibre GL JS imported successfully");
+			const maplibreModule = await import("maplibre-gl");
+			maplibregl = maplibreModule.default;
+			MaplibrePopup = maplibreModule.Popup; // Get Popup class
 
-			console.log(
-				"[DEBUG] Dynamically importing @maplibre/maplibre-gl-compare..."
-			);
 			MaplibreCompare = (await import("@maplibre/maplibre-gl-compare"))
 				.default;
-			console.log(
-				"[DEBUG] @maplibre/maplibre-gl-compare imported successfully"
-			);
 
-			if (!maplibregl || !MaplibreCompare) {
+			if (!maplibregl || !MaplibreCompare || !MaplibrePopup) {
 				throw new Error("Failed to load MapLibre libraries");
 			}
 
-			// Define map options now that maplibregl is available
 			mapOptions = {
 				style: minimalStyle,
-				center: [-2, 54.5] as [number, number], // Move center westward
+				center: [-2, 54.5],
 				zoom: 4.5,
 				minZoom: 4.5,
 				maxZoom: 13,
@@ -844,250 +577,195 @@
 				attributionControl: false,
 			};
 
-			console.log("[DEBUG] Initializing left map...");
 			mapLeft = new maplibregl.Map({
 				container: mapLeftContainer,
 				...mapOptions,
 			});
-
-			console.log("[DEBUG] Initializing right map...");
 			mapRight = new maplibregl.Map({
 				container: mapRightContainer,
 				...mapOptions,
 			});
 
-			// Add error handlers
 			mapLeft.on("error", (e: ErrorEvent) => {
-				console.error("[DEBUG] Map Left error:", e.error);
+				console.error("Map Left error:", e.error);
 				errorMessage = `Left map error: ${e.error?.message || "Unknown error"}`;
 			});
-
 			mapRight.on("error", (e: ErrorEvent) => {
-				console.error("[DEBUG] Map Right error:", e.error);
+				console.error("Map Right error:", e.error);
 				errorMessage = `Right map error: ${e.error?.message || "Unknown error"}`;
 			});
 
-			// Wait for BOTH maps to initially load
-			console.log("[DEBUG] Waiting for both maps to load...");
 			await Promise.all([
-				new Promise<void>((resolve, reject) => {
-					mapLeft!.once("load", () => {
-						console.log("[DEBUG] Map Left 'load' event fired");
-						resolve();
-					});
-					mapLeft!.once("error", (e: ErrorEvent) => {
-						console.error(
-							"[DEBUG] Map Left failed to load:",
-							e.error
-						);
-						reject(new Error(`Map Left Load: ${e.error?.message}`));
-					});
-
-					// Safety timeout
-					setTimeout(() => {
-						if (mapLeft!.loaded()) {
-							console.log(
-								"[DEBUG] Map Left loaded via timeout check"
-							);
-							resolve();
-						}
-					}, 2000);
-				}),
-				new Promise<void>((resolve, reject) => {
-					mapRight!.once("load", () => {
-						console.log("[DEBUG] Map Right 'load' event fired");
-						resolve();
-					});
-					mapRight!.once("error", (e: ErrorEvent) => {
-						console.error(
-							"[DEBUG] Map Right failed to load:",
-							e.error
-						);
-						reject(
-							new Error(`Map Right Load: ${e.error?.message}`)
-						);
-					});
-
-					// Safety timeout
-					setTimeout(() => {
-						if (mapRight!.loaded()) {
-							console.log(
-								"[DEBUG] Map Right loaded via timeout check"
-							);
-							resolve();
-						}
-					}, 2000);
-				}),
+				new Promise<void>((resolve) => mapLeft!.once("load", resolve)),
+				new Promise<void>((resolve) => mapRight!.once("load", resolve)),
 			]);
-
-			console.log("[DEBUG] Both maps loaded");
+			console.log("Both maps loaded initial style");
 			mapsInitialized = true;
 
 			if (!mapLeft || !mapRight) {
 				throw new Error("MapLibre maps not initialized after load");
 			}
 
-			// Add sources and layers - with more detailed debugging
-			console.log("[DEBUG] Adding sources and layers to both maps...");
-			try {
-				await Promise.all([
-					addSourceAndLayer(mapLeft, SOURCE_ID_LEFT, LAYER_ID_LEFT),
-					addSourceAndLayer(
-						mapRight,
-						SOURCE_ID_RIGHT,
-						LAYER_ID_RIGHT
-					),
-				]);
-				console.log("[DEBUG] Sources and layers added to both maps");
-				sourcesAndLayersAdded = true;
-			} catch (e) {
-				console.error("[DEBUG] Error adding sources and layers:", e);
-				throw new Error(
-					`Failed to add sources and layers: ${e.message}`
-				);
-			}
-
-			if (!mapLeft || !mapRight) {
-				throw new Error(
-					"Maps not available after adding sources/layers"
-				);
-			}
-
-			// --- Wait for BOTH maps to become fully loaded ---
-			console.log("[DEBUG] Waiting for maps to become idle...");
 			await Promise.all([
-				new Promise<void>((resolve) => {
-					if (mapLeft!.loaded()) {
-						console.log("[DEBUG] Map Left already idle");
-						resolve();
-					} else {
-						mapLeft!.once("idle", () => {
-							console.log("[DEBUG] Map Left 'idle' event fired");
-							resolve();
-						});
-					}
-				}),
-				new Promise<void>((resolve) => {
-					if (mapRight!.loaded()) {
-						console.log("[DEBUG] Map Right already idle");
-						resolve();
-					} else {
-						mapRight!.once("idle", () => {
-							console.log("[DEBUG] Map Right 'idle' event fired");
-							resolve();
-						});
-					}
-				}),
+				addSourceAndLayer(mapLeft, SOURCE_ID_LEFT, LAYER_ID_LEFT),
+				addSourceAndLayer(mapRight, SOURCE_ID_RIGHT, LAYER_ID_RIGHT),
 			]);
-			console.log("[DEBUG] Both maps are now idle");
+			console.log("Sources and layers added to both maps");
+			sourcesAndLayersAdded = true;
 
-			// Initialize the compare control
-			console.log("[DEBUG] Initializing MaplibreCompare control...");
+			await Promise.all([
+				new Promise<void>((resolve) => mapLeft!.once("idle", resolve)),
+				new Promise<void>((resolve) => mapRight!.once("idle", resolve)),
+			]);
+			console.log("Both maps are now idle");
+
 			if (mapLeft && mapRight) {
 				compareControl = new MaplibreCompare(
 					mapLeft,
 					mapRight,
 					"#compare-container"
 				);
-				console.log("[DEBUG] Compare control initialized");
+				console.log("Compare control initialized");
 			} else {
 				throw new Error("Maps became unavailable before compare init");
 			}
 
-			// Make maps visible after basic setup
-			console.log("[DEBUG] Making map containers visible");
 			mapLeftContainer.style.opacity = "1";
 			mapRightContainer.style.opacity = "1";
 
-			// Add click handler for left map
-			mapLeft.on("click", (e: MapMouseEvent) => {
-				const features = mapLeft!.queryRenderedFeatures(e.point, {
-					layers: [LAYER_ID_LEFT],
-				});
+			// --- Event Handlers ---
 
-				if (features.length > 0) {
-					const feature = features[0];
-					const properties = feature.properties;
-					const name = properties?.PCON24NM || properties?.NAME;
-
-					if (name) {
-						console.log(
-							`[DEBUG] Left map clicked constituency: ${name}`
-						);
-						dispatch("constituencyClick", { name });
-					}
+			// Click Handlers
+			mapLeft.on("click", LAYER_ID_LEFT, (e: MapMouseEvent) => {
+				if (e.features && e.features.length > 0) {
+					const name =
+						e.features[0].properties?.[FEATURE_NAME_PROPERTY];
+					if (name) dispatch("constituencyClick", { name });
+				}
+			});
+			mapRight.on("click", LAYER_ID_RIGHT, (e: MapMouseEvent) => {
+				if (e.features && e.features.length > 0) {
+					const name =
+						e.features[0].properties?.[FEATURE_NAME_PROPERTY];
+					if (name) dispatch("constituencyClick", { name });
 				}
 			});
 
-			// Add click handler for right map
-			mapRight.on("click", (e: MapMouseEvent) => {
-				const features = mapRight!.queryRenderedFeatures(e.point, {
-					layers: [LAYER_ID_RIGHT],
-				});
+			// Hover Handlers (Left Map)
+			mapLeft.on("mousemove", LAYER_ID_LEFT, (e: MapMouseEvent) => {
+				if (!e.features || e.features.length === 0 || !MaplibrePopup)
+					return;
+				mapLeft!.getCanvas().style.cursor = "pointer";
+				const feature = e.features[0];
+				const featureId = feature.id; // Use promoted ID
 
-				if (features.length > 0) {
-					const feature = features[0];
-					const properties = feature.properties;
-					const name = properties?.PCON24NM || properties?.NAME;
+				if (featureId !== hoveredLeftId) {
+					hoveredLeftId = featureId;
+					const name = feature.properties?.[FEATURE_NAME_PROPERTY];
+					const code = feature.properties?.[FEATURE_ID_PROPERTY]; // Get code if needed
 
-					if (name) {
-						console.log(
-							`[DEBUG] Right map clicked constituency: ${name}`
-						);
-						dispatch("constituencyClick", { name });
-					}
-				}
-			});
+					// Find the corresponding data point
+					const constituencyData = data.find(
+						(d) => d.const_code === code
+					);
+					const value = constituencyData
+						? getNumericValue(constituencyData, selectedParty)
+						: null;
+					const formattedValue = formatLegendLabel(value, leftLabel);
 
-			// Set up debugging mouse events to check feature states
-			mapLeft.on("mousemove", (e: MapMouseEvent) => {
-				const features = mapLeft!.queryRenderedFeatures(e.point, {
-					layers: [LAYER_ID_LEFT],
-				});
-				if (features.length > 0) {
-					const feature = features[0];
-					const id =
-						feature.id || feature.properties?.[FEATURE_ID_PROPERTY];
-					if (id) {
-						const state = mapLeft!.getFeatureState({
-							source: SOURCE_ID_LEFT,
-							sourceLayer: SOURCE_LAYER,
-							id,
+					const popupContent = `
+                        <div class="map-tooltip">
+                            <strong class="block text-xs font-medium mb-0.5">${name || "Unknown"}</strong>
+                            <span class="block text-[11px] text-gray-600">${leftLabel.split("(")[0].trim()}: ${formattedValue}</span>
+                        </div>`;
+
+					if (!leftPopup) {
+						leftPopup = new MaplibrePopup({
+							closeButton: false,
+							closeOnClick: false,
+							anchor: "bottom-left",
+							offset: [5, -5], // Adjust offset slightly
 						});
-						console.log(
-							`[DEBUG] LEFT Map feature state at ${e.lngLat.lng.toFixed(4)},${e.lngLat.lat.toFixed(4)}:`,
-							id,
-							state
-						);
 					}
+					leftPopup
+						.setLngLat(e.lngLat)
+						.setHTML(popupContent)
+						.addTo(mapLeft!);
 				}
 			});
 
-			// NOW it's safe to trigger the first update
-			console.log("[DEBUG] Setting isMapReadyForData = true");
+			mapLeft.on("mouseleave", LAYER_ID_LEFT, () => {
+				mapLeft!.getCanvas().style.cursor = "";
+				if (leftPopup) {
+					leftPopup.remove();
+					leftPopup = null; // Reset popup instance
+				}
+				hoveredLeftId = null;
+			});
+
+			// Hover Handlers (Right Map)
+			mapRight.on("mousemove", LAYER_ID_RIGHT, (e: MapMouseEvent) => {
+				if (!e.features || e.features.length === 0 || !MaplibrePopup)
+					return;
+				mapRight!.getCanvas().style.cursor = "pointer";
+				const feature = e.features[0];
+				const featureId = feature.id;
+
+				if (featureId !== hoveredRightId) {
+					hoveredRightId = featureId;
+					const name = feature.properties?.[FEATURE_NAME_PROPERTY];
+					const code = feature.properties?.[FEATURE_ID_PROPERTY];
+
+					const constituencyData = data.find(
+						(d) => d.const_code === code
+					);
+					const value = constituencyData
+						? getNumericValue(constituencyData, selectedMetric)
+						: null;
+					const formattedValue = formatLegendLabel(value, rightLabel);
+
+					const popupContent = `
+                        <div class="map-tooltip">
+                            <strong class="block text-xs font-medium mb-0.5">${name || "Unknown"}</strong>
+                            <span class="block text-[11px] text-gray-600">${rightLabel.split("(")[0].trim()}: ${formattedValue}</span>
+                        </div>`;
+
+					if (!rightPopup) {
+						rightPopup = new MaplibrePopup({
+							closeButton: false,
+							closeOnClick: false,
+							anchor: "bottom-left",
+							offset: [5, -5],
+						});
+					}
+					rightPopup
+						.setLngLat(e.lngLat)
+						.setHTML(popupContent)
+						.addTo(mapRight!);
+				}
+			});
+
+			mapRight.on("mouseleave", LAYER_ID_RIGHT, () => {
+				mapRight!.getCanvas().style.cursor = "";
+				if (rightPopup) {
+					rightPopup.remove();
+					rightPopup = null;
+				}
+				hoveredRightId = null;
+			});
+
+			// --- Final Setup ---
 			isMapReadyForData = true;
+			console.log("Triggering initial updateCompareMaps call");
+			updateCompareMaps(true); // Force initial update
 
-			// Initial update
-			console.log("[DEBUG] Triggering initial updateCompareMaps call");
-			updateCompareMaps(true); // Force update
-
-			// Additional updates with delays to ensure rendering
-			const scheduleUpdate = (delay: number, forceUpdate = false) => {
-				setTimeout(() => {
-					console.log(`[DEBUG] Scheduled update after ${delay}ms`);
-					updateCompareMaps(forceUpdate);
-				}, delay);
-			};
-
-			// Schedule multiple updates with increasing delays
-			scheduleUpdate(500, true);
-			scheduleUpdate(1500, true);
-			scheduleUpdate(3000);
+			// Schedule a follow-up update slightly later
+			setTimeout(() => updateCompareMaps(true), 500);
 
 			isLoading = false;
-			console.log("[DEBUG] Map initialization complete");
+			console.log("Map initialization complete");
 		} catch (error: any) {
-			console.error("[DEBUG] Error during map setup:", error);
+			console.error("Error during map setup:", error);
 			errorMessage = `Map setup failed: ${error.message || error}`;
 			isLoading = false;
 			isMapReadyForData = false;
@@ -1096,49 +774,32 @@
 
 	// --- Lifecycle: onDestroy ---
 	onDestroy(() => {
-		console.log("[DEBUG] onDestroy called, cleaning up maps");
+		console.log("onDestroy called, cleaning up maps");
 		mapsInitialized = false;
 		sourcesAndLayersAdded = false;
 		isMapReadyForData = false;
 
-		if (compareControl && typeof compareControl.remove === "function") {
-			try {
-				compareControl.remove();
-				console.log("[DEBUG] Compare control removed");
-			} catch (e) {
-				console.warn("[DEBUG] Error removing compare control:", e);
-			}
-		}
+		// Remove popups first
+		leftPopup?.remove();
+		rightPopup?.remove();
 
-		if (mapLeft) {
-			try {
-				mapLeft.remove();
-				console.log("[DEBUG] Left map removed");
-			} catch (e) {
-				console.warn("[DEBUG] Error removing left map:", e);
-			}
-		}
-
-		if (mapRight) {
-			try {
-				mapRight.remove();
-				console.log("[DEBUG] Right map removed");
-			} catch (e) {
-				console.warn("[DEBUG] Error removing right map:", e);
-			}
-		}
+		compareControl?.remove();
+		mapLeft?.remove();
+		mapRight?.remove();
 
 		mapLeft = null;
 		mapRight = null;
 		compareControl = null;
 		maplibregl = null;
 		MaplibreCompare = null;
-		console.log("[DEBUG] Cleanup complete");
+		MaplibrePopup = null;
+		leftPopup = null;
+		rightPopup = null;
+		console.log("Cleanup complete");
 	});
 
 	// --- Reactive Update Logic ---
 	$: {
-		// Ensure maps are fully ready before reacting to prop changes
 		if (
 			browser &&
 			isMapReadyForData &&
@@ -1149,41 +810,13 @@
 				selectedMetric !== prevSelectedMetric ||
 				highlightedConstituency !== prevHighlight)
 		) {
-			console.log("[DEBUG] Reactive update triggered");
-			console.log(
-				`[DEBUG] Changes detected: data=${data?.length !== prevDataLength}, party=${selectedParty !== prevSelectedParty}, metric=${selectedMetric !== prevSelectedMetric}, highlight=${highlightedConstituency !== prevHighlight}`
-			);
+			// console.log("Reactive update triggered");
 			updateCompareMaps();
 			prevDataLength = data?.length ?? 0;
 			prevSelectedParty = selectedParty;
 			prevSelectedMetric = selectedMetric;
 			prevHighlight = highlightedConstituency;
 		}
-	}
-
-	// --- formatLegendLabel helper ---
-	function formatLegendLabel(value: number | null): string {
-		if (value === null || value === undefined) return "N/A";
-		const numValue = Number(value);
-		if (isNaN(numValue)) return "N/A";
-		const checkLabel = leftLabel || rightLabel || "";
-		if (checkLabel.includes("(%)") || checkLabel.includes("Voteshare")) {
-			if (numValue >= 0 && numValue <= 1 && !checkLabel.includes("%")) {
-				return `${(numValue * 100).toFixed(1)}%`;
-			}
-			return `${numValue.toFixed(1)}%`;
-		}
-		if (checkLabel.includes("(£)")) {
-			return numValue >= 1000
-				? `£${(numValue / 1000).toFixed(0)}k`
-				: `£${numValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-		}
-		if (Math.abs(numValue) < 1 && numValue !== 0)
-			return numValue.toFixed(2);
-		if (Math.abs(numValue) < 10) return numValue.toFixed(1);
-		if (Math.abs(numValue) >= 10000)
-			return (numValue / 1000).toFixed(0) + "k";
-		return numValue.toLocaleString(undefined, { maximumFractionDigits: 0 });
 	}
 
 	// Define fixed quintile colors
@@ -1195,18 +828,6 @@
 		"#225ea8",
 	];
 </script>
-
-<!-- Add debug information -->
-{#if errorMessage}
-	<div class="debug-bar">
-		<strong>Debug:</strong> Left source: {sourceLeftLoaded ? "✅" : "❌"},
-		Right source: {sourceRightLoaded ? "✅" : "❌"}, Left layers: {layersLeftAdded
-			? "✅"
-			: "❌"}, Right layers: {layersRightAdded ? "✅" : "❌"}, Left data: {leftDataApplied
-			? "✅"
-			: "❌"}, Right data: {rightDataApplied ? "✅" : "❌"}, Updates: {updateCounter}
-	</div>
-{/if}
 
 <!-- HTML Template -->
 <div
@@ -1237,11 +858,13 @@
 					on:click={() => {
 						if (mapLeft && mapRight) {
 							errorMessage = null;
-							updateCompareMaps(true);
+							isLoading = true; // Show loading briefly
+							// Attempt a more forceful reset if needed
+							setTimeout(() => updateCompareMaps(true), 50);
 						}
 					}}
 				>
-					Force Retry
+					Retry
 				</button>
 			</div>
 		</div>
@@ -1322,8 +945,9 @@
 					<div
 						class="flex items-center justify-center sm:justify-start space-x-1"
 					>
+						<!-- MODIFIED: Pass leftLabel to formatter -->
 						<span class="text-[10px] text-gray-500 w-9 text-right"
-							>{formatLegendLabel(leftMinValue)}</span
+							>{formatLegendLabel(leftMinValue, leftLabel)}</span
 						>
 						<div
 							class="flex h-3 flex-grow max-w-[120px] rounded-sm overflow-hidden border border-gray-200"
@@ -1336,8 +960,9 @@
 								></div>
 							{/each}
 						</div>
+						<!-- MODIFIED: Pass leftLabel to formatter -->
 						<span class="text-[10px] text-gray-500 w-9 text-left"
-							>{formatLegendLabel(leftMaxValue)}</span
+							>{formatLegendLabel(leftMaxValue, leftLabel)}</span
 						>
 					</div>
 				{:else}
@@ -1361,8 +986,12 @@
 					<div
 						class="flex items-center justify-center sm:justify-end space-x-1"
 					>
+						<!-- MODIFIED: Pass rightLabel to formatter -->
 						<span class="text-[10px] text-gray-500 w-9 text-right"
-							>{formatLegendLabel(rightMinValue)}</span
+							>{formatLegendLabel(
+								rightMinValue,
+								rightLabel
+							)}</span
 						>
 						<div
 							class="flex h-3 flex-grow max-w-[120px] rounded-sm overflow-hidden border border-gray-200"
@@ -1375,8 +1004,12 @@
 								></div>
 							{/each}
 						</div>
+						<!-- MODIFIED: Pass rightLabel to formatter -->
 						<span class="text-[10px] text-gray-500 w-9 text-left"
-							>{formatLegendLabel(rightMaxValue)}</span
+							>{formatLegendLabel(
+								rightMaxValue,
+								rightLabel
+							)}</span
 						>
 					</div>
 				{:else}
@@ -1391,26 +1024,15 @@
 				class="col-span-1 sm:col-span-2 text-center text-[10px] text-gray-400 mt-1"
 			>
 				Colors show quintiles (approx. 20% bands based on available
-				data). Grey indicates no data or zero.
+				data). Grey indicates no data or zero. Hover for details.
 			</div>
 		</div>
 	{/if}
 </div>
 
-<!-- Global Styles for Compare Control - Updated for MapLibre classes -->
+<!-- Global Styles for Compare Control & Tooltip -->
 <style>
-	.debug-bar {
-		position: fixed;
-		bottom: 0;
-		left: 0;
-		right: 0;
-		background: rgba(0, 0, 0, 0.8);
-		color: white;
-		padding: 5px;
-		font-size: 12px;
-		z-index: 9999;
-		text-align: center;
-	}
+	/* Removed debug bar */
 
 	#compare-container {
 		position: relative;
@@ -1424,7 +1046,7 @@
 		height: 100%;
 	}
 
-	/* Style the main swiper line using the user's preferred style */
+	/* Style the main swiper line */
 	:global(#compare-container .maplibregl-compare) {
 		background-color: rgba(107, 114, 128, 0.5); /* gray-500 with opacity */
 		box-shadow: none;
@@ -1463,7 +1085,7 @@
 		cursor: ns-resize;
 	}
 
-	/* Add custom arrows using pseudo-elements */
+	/* Add custom arrows using pseudo-elements (Vertical) */
 	:global(
 			#compare-container
 				.maplibregl-compare
@@ -1541,6 +1163,33 @@
 		border-width: 5px 4px 0 4px;
 		border-color: #6b7280 transparent transparent transparent; /* gray-500 */
 		bottom: 7px;
+	}
+
+	/* Map Tooltip Styling */
+	:global(.maplibregl-popup-content.map-tooltip) {
+		background-color: rgba(0, 0, 0, 0.8);
+		color: #ffffff;
+		padding: 6px 8px; /* Match scatter tooltip padding */
+		border-radius: 3px; /* Match scatter tooltip corner radius */
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+		font-family: system-ui, sans-serif;
+		font-size: 11px; /* Match scatter tooltip body font size */
+		line-height: 1.4;
+		border: 1px solid rgba(255, 255, 255, 0.1); /* Match scatter tooltip border */
+		max-width: 240px; /* Prevent overly wide tooltips */
+		pointer-events: none; /* Prevent popup from capturing mouse events */
+	}
+	:global(.maplibregl-popup-content.map-tooltip strong) {
+		font-weight: bold;
+		font-size: 12px; /* Slightly larger for title */
+	}
+	:global(.maplibregl-popup-anchor-top .maplibregl-popup-tip),
+	:global(.maplibregl-popup-anchor-bottom .maplibregl-popup-tip),
+	:global(.maplibregl-popup-anchor-left .maplibregl-popup-tip),
+	:global(.maplibregl-popup-anchor-right .maplibregl-popup-tip) {
+		/* Optional: Style the popup arrow if needed, or hide it */
+		/* Example: border-top-color: rgba(0, 0, 0, 0.8); */
+		display: none; /* Hide the default arrow for cleaner look */
 	}
 
 	.relative {
