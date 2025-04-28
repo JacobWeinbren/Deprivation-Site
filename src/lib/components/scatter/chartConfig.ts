@@ -53,11 +53,6 @@ export const metrics: MetricOption[] = [
 	},
 	// Group: Economic - Importance #2
 	{
-		value: "annualincome",
-		label: "Median Annual Income (£)", // Direct income
-		group: "Economic",
-	},
-	{
 		value: "child_poverty_percentage_22_23",
 		label: "Child Poverty % (22/23)", // Direct poverty measure
 		group: "Economic",

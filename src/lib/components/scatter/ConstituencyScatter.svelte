@@ -433,7 +433,7 @@
 				for="party-select-{Math.random().toString(36).substring(2)}"
 				class="block text-sm font-medium text-gray-700 mb-1.5"
 			>
-				Party Voteshare (Y-axis):
+				Party Voteshare:
 			</label>
 			<select
 				id="party-select-{Math.random().toString(36).substring(2)}"
@@ -451,7 +451,7 @@
 				for="metric-select-{Math.random().toString(36).substring(2)}"
 				class="block text-sm font-medium text-gray-700 mb-1.5"
 			>
-				Metric/Variable (X-axis):
+				Metric:
 			</label>
 			<select
 				id="metric-select-{Math.random().toString(36).substring(2)}"
