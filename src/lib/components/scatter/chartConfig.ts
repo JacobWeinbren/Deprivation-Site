@@ -228,7 +228,7 @@ export const metrics: MetricOption[] = [
 	{
 		value: "privaterent",
 		label: "Proportion Renting (Private+Social) (%)",
-		group: "Social/Demographic (Original)",
+		group: "Housing & Households (Tenure)",
 	}, // Kept commented
 	{
 		value: "census_HouseholdOnePerson",
