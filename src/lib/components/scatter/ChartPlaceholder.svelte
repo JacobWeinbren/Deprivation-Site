@@ -5,7 +5,7 @@
 </script>
 
 <div
-	class="absolute inset-0 flex items-center justify-center text-center p-4 bg-gray-50/90 z-10 transition-opacity duration-150"
+	class="absolute inset-0 flex items-center justify-center text-center bg-gray-50/90 z-10 transition-opacity duration-150"
 >
 	{#if errorMessage}
 		<div class="flex flex-col items-center text-red-700">

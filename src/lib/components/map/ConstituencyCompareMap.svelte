@@ -1,57 +1,37 @@
 <script lang="ts">
-	import { onMount, onDestroy } from "svelte";
+	import { onMount, onDestroy, createEventDispatcher } from "svelte";
 	import { browser } from "$app/environment";
 	import type {
-		Map as MaplibreMap,
-		MapOptions,
-		LngLatLike,
-		LngLatBoundsLike,
-		ErrorEvent,
-		MapDataEvent,
+		MaplibreMap,
 		MapMouseEvent,
-		Popup,
-		GeoJSONGeometry,
-		NavigationControl,
-	} from "maplibre-gl";
-
-	// Import Config and Base Utils
-	import type {
+		MapErrorEvent,
 		ConstituencyData,
 		MetricOption,
 		PartyOption,
-	} from "$lib/components/scatter/types";
-	import { getNumericValue } from "$lib/components/scatter/utils";
-	import { formatLegendLabel } from "$lib/components/scatter/ChartUtils";
+		NavigationControl,
+	} from "$lib/types";
 
-	// Import Map Specific Utils, Constants, Setup
-	import { calculateBounds, zoomToBounds } from "./mapUtils";
+	// Import Config and Base Utils
+	import { getNumericValue, formatDisplayValue } from "$lib/utils";
 	import {
-		addInitialSourceAndLayers,
-		updateMapPaintProperties,
-	} from "./mapLayerUtils"; // Use non-animated version
-	import { initializeMapInstance } from "./mapSetup";
-	import {
-		SOURCE_ID_LEFT,
-		LAYER_ID_LEFT,
-		SOURCE_ID_RIGHT,
-		LAYER_ID_RIGHT,
-		SOURCE_LAYER,
-		FEATURE_ID_PROPERTY,
-		FEATURE_NAME_PROPERTY,
-		NO_DATA_COLOR,
 		metricQuintileColors,
 		partyQuintileColors,
-	} from "./MapConstants";
+		FEATURE_NAME_PROPERTY,
+		FEATURE_ID_PROPERTY,
+		SOURCE_LAYER, // Import SOURCE_LAYER
+	} from "$lib/config";
+
+	// Import Map Specific Utils, Constants, Setup
+	import {
+		addOrUpdateSourceAndLayers,
+		updateMapPaint,
+	} from "./mapLayerUtils";
+	import { initializeMapInstance } from "./mapSetup";
 
 	// Import sub-components
 	import MapTooltip from "./MapTooltip.svelte";
 	import MapLegend from "./MapLegend.svelte";
 	import MapErrorOverlay from "./MapErrorOverlay.svelte";
-
-	import { createEventDispatcher } from "svelte";
-	const dispatch = createEventDispatcher<{
-		constituencyClick: { name: string };
-	}>();
 
 	// --- Props ---
 	export let data: ConstituencyData[] = [];
@@ -60,7 +40,6 @@
 	export let highlightedConstituency: string | null = null;
 	export let metrics: MetricOption[] = [];
 	export let parties: PartyOption[] = [];
-	// partyColors prop is not used for map styling
 	export let mapIdLeft: string =
 		"compare-map-left-" + Math.random().toString(36).substring(2, 9);
 	export let mapIdRight: string =
@@ -74,17 +53,15 @@
 	let compareControl: any = null;
 	let navControlLeft: NavigationControl | null = null;
 	let navControlRight: NavigationControl | null = null;
-	let isLoading: boolean = true;
+	let isLoading: boolean = true; // Start true
 	let errorMessage: string | null = null;
-	let mapsInitialized = false;
-	let sourcesAndLayersAdded = false;
-	let isMapReadyForData = false;
+	let isReady: boolean = false;
 	let compareControlInitialized = false;
+	let compareContainerElement: HTMLElement;
 
 	// --- Dynamically Imported Modules ---
 	let maplibregl: typeof import("maplibre-gl") | null = null;
 	let MaplibreCompare: any = null;
-	let MaplibrePopup: typeof Popup | null = null;
 	let MaplibreNavigationControl: typeof NavigationControl | null = null;
 
 	// --- Component State ---
@@ -94,13 +71,11 @@
 	let rightLabel: string = "";
 	let rightMinValue: number | null = null;
 	let rightMaxValue: number | null = null;
-	let hoveredLeftId: string | number | null = null;
-	let hoveredRightId: string | number | null = null;
+	let hoveredFeatureId: string | number | null = null;
 	let customPopupVisible = false;
 	let customPopupContent = "";
 	let customPopupPosition = { x: 0, y: 0 };
 	let containerRect: DOMRect | null = null;
-	let compareContainerElement: HTMLElement;
 
 	// --- Tracking previous values ---
 	let prevSelectedParty = selectedParty;
@@ -108,329 +83,355 @@
 	let prevHighlight = highlightedConstituency;
 	let prevDataLength = data?.length ?? 0;
 
+	const dispatch = createEventDispatcher<{
+		constituencyClick: { name: string };
+	}>();
+	const logPrefix = "[CompareMap]"; // Logging prefix
+
 	// --- Map Interaction Handlers ---
 	function handleConstituencyClick(e: MapMouseEvent) {
 		if (e.features && e.features.length > 0) {
 			const feature = e.features[0];
 			const name = feature.properties?.[FEATURE_NAME_PROPERTY];
-			if (name) dispatch("constituencyClick", { name });
-			const bounds = calculateBounds(feature.geometry);
-			zoomToBounds(mapLeft, mapRight, bounds);
+			if (name) {
+				console.log(
+					`${logPrefix} Clicked on ${name}, dispatching event.`
+				);
+				dispatch("constituencyClick", { name });
+			} else {
+				console.warn(
+					`${logPrefix} Clicked feature missing name property.`
+				);
+			}
 		}
 	}
-	export function zoomToConstituency(name: string) {
-		if (!mapLeft || !mapRight || !data || data.length === 0) return;
-		const constituency = data.find((d) => d.constituency_name === name);
-		if (!constituency?.const_code) return;
-		const features = mapLeft.querySourceFeatures(SOURCE_ID_LEFT, {
-			sourceLayer: SOURCE_LAYER,
-			filter: ["==", FEATURE_ID_PROPERTY, constituency.const_code],
-		});
-		if (features?.length > 0) {
-			const bounds = calculateBounds(features[0].geometry);
-			zoomToBounds(mapLeft, mapRight, bounds);
-		}
-	}
-	function handleMouseMove(
-		map: MaplibreMap,
-		e: MapMouseEvent,
-		isLeftMap: boolean
-	) {
+
+	function handleMouseMove(map: MaplibreMap, e: MapMouseEvent) {
 		if (!e.features || e.features.length === 0) {
-			if (
-				(isLeftMap && hoveredLeftId !== null) ||
-				(!isLeftMap && hoveredRightId !== null)
-			) {
-				handleMouseLeave(map, isLeftMap);
+			if (hoveredFeatureId !== null) {
+				handleMouseLeave(map);
 			}
 			return;
 		}
+
 		map.getCanvas().style.cursor = "pointer";
 		const feature = e.features[0];
 		const featureId = feature.id;
-		if (
-			(isLeftMap && featureId === hoveredLeftId) ||
-			(!isLeftMap && featureId === hoveredRightId)
-		) {
-			if (!containerRect)
-				containerRect = compareContainerElement.getBoundingClientRect();
-			customPopupPosition = { x: e.point.x, y: e.point.y };
-			return;
-		}
-		if (isLeftMap) hoveredLeftId = featureId;
-		else hoveredRightId = featureId;
-		const name = feature.properties?.[FEATURE_NAME_PROPERTY];
-		const code = feature.properties?.[FEATURE_ID_PROPERTY];
-		const constituencyData = data.find((d) => d.const_code === code);
-		const selectedKey = isLeftMap ? selectedParty : selectedMetric;
-		const label = isLeftMap ? leftLabel : rightLabel;
-		const value = constituencyData
-			? getNumericValue(constituencyData, selectedKey)
-			: null;
-		const formattedValue = formatLegendLabel(value, label);
-		customPopupContent = `<div class="custom-map-tooltip"><strong>${name || "Unknown"}</strong><span class="block text-[11px]">${label.split("(")[0].trim()}: ${formattedValue}</span></div>`;
+
 		if (!containerRect)
 			containerRect = compareContainerElement.getBoundingClientRect();
 		customPopupPosition = { x: e.point.x, y: e.point.y };
+
+		if (featureId === hoveredFeatureId) {
+			return; // Already showing tooltip
+		}
+
+		hoveredFeatureId = featureId;
+
+		const name = feature.properties?.[FEATURE_NAME_PROPERTY];
+		const code = feature.properties?.[FEATURE_ID_PROPERTY];
+		const constituencyData = data.find((d) => d.const_code === code);
+
+		// Determine which map side the layer belongs to
+		const layerId = feature.layer.id;
+		const isLeftLayer = layerId.includes("-left"); // Simple check based on convention
+		const selectedKey = isLeftLayer ? selectedParty : selectedMetric;
+		const label = isLeftLayer ? leftLabel : rightLabel;
+		const value = constituencyData
+			? getNumericValue(constituencyData, selectedKey)
+			: null;
+		const formattedValue = formatDisplayValue(value, label);
+
+		customPopupContent = `<div class="map-tooltip-content"><strong>${name || "Unknown"}</strong><span class="block text-xs">${label.split("(")[0].trim()}: ${formattedValue}</span></div>`;
 		customPopupVisible = true;
 	}
-	function handleMouseLeave(map: MaplibreMap, isLeftMap: boolean) {
-		map.getCanvas().style.cursor = "";
-		if (isLeftMap) {
-			if (hoveredLeftId !== null) {
-				hoveredLeftId = null;
-				customPopupVisible = false;
-			}
-		} else {
-			if (hoveredRightId !== null) {
-				hoveredRightId = null;
-				customPopupVisible = false;
-			}
-		}
-		if (hoveredLeftId === null && hoveredRightId === null)
+
+	function handleMouseLeave(map: MaplibreMap) {
+		if (hoveredFeatureId !== null) {
+			map.getCanvas().style.cursor = "";
+			hoveredFeatureId = null;
 			customPopupVisible = false;
-	}
-
-	// --- Feature State & Style Update Logic ---
-	function updateFeatureStates(
-		mapInstance: MaplibreMap | null,
-		sourceId: string,
-		variableKey: string,
-		variableType: "party" | "metric"
-	): boolean {
-		if (
-			!mapInstance ||
-			!mapInstance.isStyleLoaded() ||
-			!mapInstance.getSource(sourceId)
-		)
-			return false;
-		if (!data || data.length === 0 || !variableKey) return false;
-		const validValues: number[] = [];
-		const featureData: {
-			[code: string]: { value: number | null; name: string };
-		} = {};
-		data.forEach((d) => {
-			const code = d.const_code;
-			const name = d.constituency_name;
-			if (!code || !name) return;
-			const value = getNumericValue(d, variableKey);
-			featureData[code] = { value, name };
-			if (value !== null && isFinite(value) && value >= 0)
-				validValues.push(value);
-		});
-		const currentMinValue =
-			validValues.length > 0 ? Math.min(...validValues) : null;
-		const currentMaxValue =
-			validValues.length > 0 ? Math.max(...validValues) : null;
-		if (variableType === "party") {
-			const partyInfo = parties.find((p) => p.value === variableKey);
-			leftLabel = partyInfo?.label || variableKey;
-			leftMinValue = currentMinValue;
-			leftMaxValue = currentMaxValue;
-		} else {
-			const metricInfo = metrics.find((m) => m.value === variableKey);
-			rightLabel = metricInfo?.label || variableKey;
-			rightMinValue = currentMinValue;
-			rightMaxValue = currentMaxValue;
 		}
-		let featuresUpdated = 0;
-		Object.entries(featureData).forEach(([code, { name }]) => {
-			const isHighlighted = name === highlightedConstituency;
-			try {
-				const features = mapInstance.querySourceFeatures(sourceId, {
-					sourceLayer: SOURCE_LAYER,
-					filter: ["==", FEATURE_ID_PROPERTY, code],
-				});
-				if (features.length > 0) {
-					mapInstance.setFeatureState(
-						{
-							source: sourceId,
-							sourceLayer: SOURCE_LAYER,
-							id: code,
-						},
-						{ highlighted: isHighlighted }
-					);
-					featuresUpdated++;
-				}
-			} catch (e) {
-				/* Silently handle */
-			}
-		});
-		return featuresUpdated > 0;
 	}
 
-	// --- Main Update Function (No Animation) ---
-	function updateCompareMaps(forceUpdate = false) {
-		if (!mapsInitialized || !sourcesAndLayersAdded || !isMapReadyForData)
+	// --- Update Map Styles ---
+	function updateMapStyles(forceUpdate = false) {
+		if (!isReady || !mapLeft || !mapRight) {
+			// console.warn(`${logPrefix} updateMapStyles called but maps not ready.`);
 			return;
-		if (!mapLeft || !mapRight) return;
+		}
+		// console.log(`${logPrefix} Updating map styles. Force: ${forceUpdate}`);
 		errorMessage = null;
-		const stateUpdatedLeft = updateFeatureStates(
+
+		// Update labels and min/max values for the legend
+		const partyInfo = parties.find((p) => p.value === selectedParty);
+		leftLabel = partyInfo?.label || selectedParty;
+		const metricInfo = metrics.find((m) => m.value === selectedMetric);
+		rightLabel = metricInfo?.label || selectedMetric;
+
+		const partyValues = data
+			.map((d) => getNumericValue(d, selectedParty))
+			.filter((v): v is number => v !== null && isFinite(v) && v >= 0);
+		const metricValues = data
+			.map((d) => getNumericValue(d, selectedMetric))
+			.filter((v): v is number => v !== null && isFinite(v) && v >= 0);
+
+		leftMinValue = partyValues.length > 0 ? Math.min(...partyValues) : null;
+		leftMaxValue = partyValues.length > 0 ? Math.max(...partyValues) : null;
+		rightMinValue =
+			metricValues.length > 0 ? Math.min(...metricValues) : null;
+		rightMaxValue =
+			metricValues.length > 0 ? Math.max(...metricValues) : null;
+
+		// Update paint properties
+		updateMapPaint(
 			mapLeft,
-			SOURCE_ID_LEFT,
+			"constituency-fills-left",
+			"constituency-highlight-left",
+			"party",
 			selectedParty,
-			"party"
+			data,
+			highlightedConstituency
 		);
-		const stateUpdatedRight = updateFeatureStates(
+		updateMapPaint(
 			mapRight,
-			SOURCE_ID_RIGHT,
+			"constituency-fills-right",
+			"constituency-highlight-right",
+			"metric",
 			selectedMetric,
-			"metric"
+			data,
+			highlightedConstituency
 		);
-		if (stateUpdatedLeft || forceUpdate) {
-			updateMapPaintProperties(
-				mapLeft,
-				LAYER_ID_LEFT,
-				`${LAYER_ID_LEFT}-highlight-outline`,
-				SOURCE_ID_LEFT,
-				"party",
-				selectedParty,
-				data,
-				highlightedConstituency
-			);
-		}
-		if (stateUpdatedRight || forceUpdate) {
-			updateMapPaintProperties(
-				mapRight,
-				LAYER_ID_RIGHT,
-				`${LAYER_ID_RIGHT}-highlight-outline`,
-				SOURCE_ID_RIGHT,
-				"metric",
-				selectedMetric,
-				data,
-				highlightedConstituency
-			);
-		}
+		// console.log(`${logPrefix} Map styles update complete.`);
 	}
 
 	// --- Lifecycle ---
 	onMount(async () => {
+		console.log(`${logPrefix} Component mounted.`);
 		if (!browser) return;
-		isLoading = true;
-		mapsInitialized = false;
-		sourcesAndLayersAdded = false;
-		isMapReadyForData = false;
+		isLoading = true; // Start loading
+		isReady = false;
 		compareControlInitialized = false;
 		errorMessage = null;
+
 		try {
+			console.log(`${logPrefix} Loading libraries...`);
 			const maplibreModule = await import("maplibre-gl");
 			maplibregl = maplibreModule.default;
-			MaplibrePopup = maplibreModule.Popup;
 			MaplibreNavigationControl = maplibreModule.NavigationControl;
 			MaplibreCompare = (await import("@maplibre/maplibre-gl-compare"))
 				.default;
-			if (!maplibregl || !MaplibreCompare || !MaplibreNavigationControl)
+
+			if (!maplibregl || !MaplibreCompare || !MaplibreNavigationControl) {
 				throw new Error("Failed to load MapLibre libraries");
-			const mapLeftInstance = initializeMapInstance(
-				maplibregl,
-				MaplibreNavigationControl,
-				mapLeftContainer,
-				(e) => {
-					errorMessage = `Left map error: ${e.error?.message || "Unknown error"}`;
+			}
+			console.log(`${logPrefix} Libraries loaded.`);
+
+			const handleError = (side: string) => (e: MapErrorEvent) => {
+				// Avoid setting error if it's just a tile load error (can be transient)
+				if (e.error?.message?.includes("Failed to load tile")) {
+					console.warn(
+						`${logPrefix} Tile load error (${side}):`,
+						e.error.message
+					);
+					return;
 				}
+				console.error(
+					`${logPrefix} Unrecoverable map error (${side}):`,
+					e.error
+				);
+				errorMessage = `${side} map error: ${e.error?.message || "Unknown error"}`;
+				isLoading = false;
+				isReady = false; // Mark as not ready on critical error
+			};
+
+			console.log(`${logPrefix} Initializing map instances...`);
+			const [mapLeftResult, mapRightResult] = await Promise.all([
+				initializeMapInstance(
+					maplibregl,
+					MaplibreNavigationControl,
+					mapLeftContainer,
+					handleError("Left")
+				),
+				initializeMapInstance(
+					maplibregl,
+					MaplibreNavigationControl,
+					mapRightContainer,
+					handleError("Right")
+				),
+			]).catch((initError) => {
+				// Catch errors from initializeMapInstance promise rejection
+				console.error(
+					`${logPrefix} Map initialization failed:`,
+					initError
+				);
+				throw initError instanceof Error
+					? initError
+					: new Error("Map initialization failed.");
+			});
+			console.log(
+				`${logPrefix} Map instances initialized (pending load event).`
 			);
-			const mapRightInstance = initializeMapInstance(
-				maplibregl,
-				MaplibreNavigationControl,
-				mapRightContainer,
-				(e) => {
-					errorMessage = `Right map error: ${e.error?.message || "Unknown error"}`;
-				}
-			);
-			if (!mapLeftInstance || !mapRightInstance)
-				throw new Error("Map instance initialization failed.");
-			mapLeft = mapLeftInstance.map;
-			navControlLeft = mapLeftInstance.navControl;
-			mapRight = mapRightInstance.map;
-			navControlRight = mapRightInstance.navControl;
-			mapLeft.on("click", LAYER_ID_LEFT, handleConstituencyClick);
-			mapRight.on("click", LAYER_ID_RIGHT, handleConstituencyClick);
-			mapLeft.on("mousemove", LAYER_ID_LEFT, (e) =>
-				handleMouseMove(mapLeft!, e, true)
-			);
-			mapRight.on("mousemove", LAYER_ID_RIGHT, (e) =>
-				handleMouseMove(mapRight!, e, false)
-			);
-			mapLeft.on("mouseleave", LAYER_ID_LEFT, () =>
-				handleMouseLeave(mapLeft!, true)
-			);
-			mapRight.on("mouseleave", LAYER_ID_RIGHT, () =>
-				handleMouseLeave(mapRight!, false)
-			);
+
+			// Destructure results after promise resolution
+			mapLeft = mapLeftResult.map;
+			navControlLeft = mapLeftResult.navControl;
+			mapRight = mapRightResult.map;
+			navControlRight = mapRightResult.navControl;
+
+			// Note: initializeMapInstance now resolves *after* 'load' event
+
+			console.log(`${logPrefix} Adding sources and layers...`);
 			await Promise.all([
-				new Promise<void>((resolve) => mapLeft!.once("load", resolve)),
-				new Promise<void>((resolve) => mapRight!.once("load", resolve)),
-			]);
-			mapsInitialized = true;
-			await Promise.all([
-				addInitialSourceAndLayers(
+				addOrUpdateSourceAndLayers(
 					mapLeft,
-					SOURCE_ID_LEFT,
-					LAYER_ID_LEFT,
-					`${LAYER_ID_LEFT}-highlight-outline`
+					"constituencies-source", // Shared source ID
+					"constituency-fills-left",
+					"constituency-highlight-left"
 				),
-				addInitialSourceAndLayers(
+				addOrUpdateSourceAndLayers(
 					mapRight,
-					SOURCE_ID_RIGHT,
-					LAYER_ID_RIGHT,
-					`${LAYER_ID_RIGHT}-highlight-outline`
+					"constituencies-source", // Shared source ID
+					"constituency-fills-right",
+					"constituency-highlight-right"
 				),
 			]);
-			sourcesAndLayersAdded = true;
+			console.log(`${logPrefix} Sources and layers added.`);
+
+			// Wait for maps to be idle after adding layers (extra safety)
+			console.log(`${logPrefix} Waiting for maps to idle...`);
 			await Promise.all([
 				new Promise<void>((resolve) => mapLeft!.once("idle", resolve)),
 				new Promise<void>((resolve) => mapRight!.once("idle", resolve)),
 			]);
+			console.log(`${logPrefix} Maps are idle.`);
+
+			// Setup Compare Control
 			if (mapLeft && mapRight && compareContainerElement) {
+				console.log(`${logPrefix} Initializing compare control...`);
 				try {
 					compareControl = new MaplibreCompare(
 						mapLeft,
 						mapRight,
 						compareContainerElement
 					);
-					if (!compareControlInitialized) {
-						requestAnimationFrame(() => {
-							setTimeout(() => {
-								if (compareControl) {
-									window.dispatchEvent(new Event("resize"));
-									compareControlInitialized = true;
-								}
-							}, 100);
-						});
-					}
+					requestAnimationFrame(() => {
+						setTimeout(() => {
+							console.log(
+								`${logPrefix} Triggering resize for compare control.`
+							);
+							window.dispatchEvent(new Event("resize"));
+							compareControlInitialized = true;
+						}, 150);
+					});
 				} catch (compareError) {
+					console.error(
+						`${logPrefix} Map compare control init error:`,
+						compareError
+					);
 					throw new Error(
 						"Map compare control failed to initialize."
 					);
 				}
 			} else {
 				throw new Error(
-					"Maps or container unavailable before compare init"
+					"Maps or container unavailable for compare init"
 				);
 			}
-			mapLeftContainer.style.opacity = "1";
-			mapRightContainer.style.opacity = "1";
-			isMapReadyForData = true;
-			updateCompareMaps(true);
-			isLoading = false;
-			console.log("Map initialization complete");
+
+			// Setup event listeners
+			console.log(`${logPrefix} Adding event listeners...`);
+			mapLeft.on(
+				"click",
+				"constituency-fills-left",
+				handleConstituencyClick
+			);
+			mapRight.on(
+				"click",
+				"constituency-fills-right",
+				handleConstituencyClick
+			);
+			mapLeft.on("mousemove", "constituency-fills-left", (e) =>
+				handleMouseMove(mapLeft!, e)
+			);
+			mapRight.on("mousemove", "constituency-fills-right", (e) =>
+				handleMouseMove(mapRight!, e)
+			);
+			mapLeft.on("mouseleave", "constituency-fills-left", () =>
+				handleMouseLeave(mapLeft!)
+			);
+			mapRight.on("mouseleave", "constituency-fills-right", () =>
+				handleMouseLeave(mapRight!)
+			);
+
+			// Maps are ready
+			console.log(
+				`${logPrefix} Maps are ready. Performing initial style update.`
+			);
+			isReady = true;
+			updateMapStyles(true); // Initial style update
+			isLoading = false; // Set loading false *after* everything is ready
+			console.log(`${logPrefix} Map initialization complete.`);
 		} catch (error: any) {
-			console.error("Error during map setup:", error);
+			console.error(`${logPrefix} Error during map setup:`, error);
 			errorMessage = `Map setup failed: ${error.message || error}`;
-			isLoading = false;
-			isMapReadyForData = false;
+			isLoading = false; // Ensure loading stops on error
+			isReady = false;
 		}
 	});
 
 	onDestroy(() => {
-		console.log("Map onDestroy: Cleaning up...");
-		if (navControlLeft && mapLeft?.hasControl(navControlLeft))
-			mapLeft.removeControl(navControlLeft);
-		if (navControlRight && mapRight?.hasControl(navControlRight))
-			mapRight.removeControl(navControlRight);
-		compareControl?.remove();
-		mapLeft?.remove();
-		mapRight?.remove();
+		console.log(`${logPrefix} Component destroying...`);
+		// Remove event listeners first
+		try {
+			mapLeft?.off(
+				"click",
+				"constituency-fills-left",
+				handleConstituencyClick
+			);
+			mapRight?.off(
+				"click",
+				"constituency-fills-right",
+				handleConstituencyClick
+			);
+			mapLeft?.off(
+				"mousemove",
+				"constituency-fills-left",
+				handleMouseMove
+			);
+			mapRight?.off(
+				"mousemove",
+				"constituency-fills-right",
+				handleMouseMove
+			);
+			mapLeft?.off(
+				"mouseleave",
+				"constituency-fills-left",
+				handleMouseLeave
+			);
+			mapRight?.off(
+				"mouseleave",
+				"constituency-fills-right",
+				handleMouseLeave
+			);
+		} catch (e) {
+			console.warn(`${logPrefix} Error removing listeners:`, e);
+		}
+
+		// Remove controls and maps
+		try {
+			compareControl?.remove();
+			if (navControlLeft && mapLeft?.hasControl(navControlLeft))
+				mapLeft.removeControl(navControlLeft);
+			if (navControlRight && mapRight?.hasControl(navControlRight))
+				mapRight.removeControl(navControlRight);
+			mapLeft?.remove();
+			mapRight?.remove();
+		} catch (e) {
+			console.warn(`${logPrefix} Error removing map resources:`, e);
+		}
+
+		// Clear state
 		mapLeft = null;
 		mapRight = null;
 		compareControl = null;
@@ -438,24 +439,23 @@
 		navControlRight = null;
 		maplibregl = null;
 		MaplibreCompare = null;
-		MaplibrePopup = null;
 		MaplibreNavigationControl = null;
-		console.log("Map cleanup complete");
+		isReady = false;
+		console.log(`${logPrefix} Map cleanup complete.`);
 	});
 
 	// --- Reactive Update Logic ---
 	$: {
 		if (
 			browser &&
-			isMapReadyForData &&
-			mapsInitialized &&
-			sourcesAndLayersAdded &&
+			isReady && // Only update if maps are fully ready
 			(data?.length !== prevDataLength ||
 				selectedParty !== prevSelectedParty ||
 				selectedMetric !== prevSelectedMetric ||
 				highlightedConstituency !== prevHighlight)
 		) {
-			updateCompareMaps();
+			// console.log(`${logPrefix} Reactive change detected, updating map styles.`);
+			updateMapStyles();
 			prevDataLength = data?.length ?? 0;
 			prevSelectedParty = selectedParty;
 			prevSelectedMetric = selectedMetric;
@@ -463,35 +463,57 @@
 		}
 	}
 
-	// --- Global Event Listeners ---
+	// --- Global Event Listener for Retry ---
 	function handleRetry() {
-		if (mapLeft && mapRight) {
+		if (!isLoading && errorMessage) {
+			console.log(`${logPrefix} Retrying map operation...`);
 			errorMessage = null;
 			isLoading = true;
+			// Attempt to re-run the setup logic by forcing a re-mount?
+			// Or simply try updating styles if isReady was somehow true?
+			// For simplicity, let's assume a full re-init might be needed.
+			// A simple way is to reload the page, but less ideal UX.
+			// A more complex way involves resetting state and re-triggering onMount logic.
+			// Let's just try updating styles if possible, otherwise indicate failure.
 			setTimeout(() => {
-				updateCompareMaps(true);
-				isLoading = false;
+				if (isReady && mapLeft && mapRight) {
+					console.log(
+						`${logPrefix} Retry: Maps seem ready, forcing style update.`
+					);
+					updateMapStyles(true);
+					isLoading = false;
+				} else {
+					console.error(
+						`${logPrefix} Retry failed: Maps not initialized.`
+					);
+					isLoading = false;
+					errorMessage =
+						"Retry failed: Maps could not be initialized.";
+				}
 			}, 50);
 		}
 	}
-	$: if (browser) {
-		window.addEventListener("retry", handleRetry);
-		() => window.removeEventListener("retry", handleRetry);
-	}
+	onMount(() => {
+		if (browser) window.addEventListener("retry", handleRetry);
+	});
+	onDestroy(() => {
+		if (browser) window.removeEventListener("retry", handleRetry);
+	});
 </script>
 
-<!-- HTML Template -->
+<!-- Template remains the same -->
 <div
-	class="relative font-sans border border-gray-200/75 rounded-lg bg-white overflow-hidden shadow-sm"
+	class="relative overflow-hidden rounded-lg border border-gray-200/80 bg-white font-sans shadow-sm"
 >
-	<MapErrorOverlay {errorMessage} {isLoading} />
+	<MapErrorOverlay {errorMessage} {isLoading} on:retry={handleRetry} />
+
 	<div
 		bind:this={compareContainerElement}
 		id="compare-container"
-		class="relative w-full h-[450px] sm:h-[500px] md:h-[550px] rounded-t-lg overflow-hidden bg-gray-100 {isLoading ||
+		class="relative h-[450px] w-full overflow-hidden rounded-t-lg bg-gray-100 sm:h-[500px] md:h-[550px] {isLoading ||
 		errorMessage
-			? 'opacity-50 blur-[2px] pointer-events-none'
-			: ''} transition-all duration-200"
+			? 'opacity-50 blur-[1px] pointer-events-none'
+			: ''} transition-opacity duration-200"
 	>
 		<div
 			bind:this={mapLeftContainer}
@@ -509,6 +531,7 @@
 			position={customPopupPosition}
 		/>
 	</div>
+
 	<MapLegend
 		{leftLabel}
 		{leftMinValue}
@@ -523,287 +546,25 @@
 	/>
 </div>
 
-<!-- Global Styles for Compare Control & Navigation -->
+<!-- Style remains the same -->
 <style>
-	#compare-container {
-		position: relative;
-		overflow: hidden;
-	}
-	#compare-container > div[id^="compare-map-"] {
+	#compare-container > div.map-instance {
 		position: absolute;
 		top: 0;
 		bottom: 0;
 		width: 100%;
 		height: 100%;
 	}
-
-	/* Style the main swiper line */
-	:global(#compare-container .maplibregl-compare) {
-		background-color: rgba(55, 65, 81, 0.4); /* gray-700 with opacity */
-		box-shadow: none;
-		border: none;
-		width: 3px !important; /* Slightly thicker */
-		height: 100% !important;
-		z-index: 10;
-	}
-
-	/* Style the handle */
-	:global(#compare-container .maplibregl-compare .compare-swiper-vertical),
-	:global(#compare-container .maplibregl-compare .compare-swiper-horizontal) {
-		width: 40px !important; /* Slightly larger */
-		height: 40px !important;
-		background-color: rgba(255, 255, 255, 0.9) !important;
-		background-image: none !important;
-		border-radius: 50% !important;
-		box-shadow:
-			0 1px 3px rgba(0, 0, 0, 0.15),
-			0 0 0 1px rgba(0, 0, 0, 0.05) !important;
-		border: 1px solid rgba(0, 0, 0, 0.1);
-		cursor: ew-resize;
-		top: 50%;
-		left: 50%;
-		transform: translate(-50%, -50%);
-		margin: 0 !important;
-		transition: background-color 0.15s ease-in-out;
-	}
-	:global(
-			#compare-container
-				.maplibregl-compare
-				.compare-swiper-vertical:hover
-		),
-	:global(
-			#compare-container
-				.maplibregl-compare
-				.compare-swiper-horizontal:hover
-		) {
-		background-color: rgba(255, 255, 255, 1) !important;
-		box-shadow:
-			0 2px 5px rgba(0, 0, 0, 0.2),
-			0 0 0 1px rgba(0, 0, 0, 0.07) !important;
-	}
-
-	/* Adjust cursor for horizontal swiper handle */
-	:global(#compare-container .maplibregl-compare .compare-swiper-horizontal) {
-		cursor: ns-resize;
-	}
-
-	/* Add custom arrows using pseudo-elements (Vertical) */
-	:global(
-			#compare-container
-				.maplibregl-compare
-				.compare-swiper-vertical::before
-		),
-	:global(
-			#compare-container
-				.maplibregl-compare
-				.compare-swiper-vertical::after
-		) {
-		content: "";
-		position: absolute;
-		width: 0;
-		height: 0;
-		border-style: solid;
-		top: 50%;
-		transform: translateY(-50%);
-		transition: border-color 0.15s ease-in-out;
-	}
-	:global(
-			#compare-container
-				.maplibregl-compare
-				.compare-swiper-vertical::before
-		) {
-		/* Left arrow */
-		border-width: 5px 6px 5px 0; /* Slightly larger */
-		border-color: transparent #4b5563 transparent transparent; /* gray-600 */
-		left: 8px;
-	}
-	:global(
-			#compare-container
-				.maplibregl-compare
-				.compare-swiper-vertical::after
-		) {
-		/* Right arrow */
-		border-width: 5px 0 5px 6px;
-		border-color: transparent transparent transparent #4b5563; /* gray-600 */
-		right: 8px;
-	}
-	:global(
-			#compare-container
-				.maplibregl-compare
-				.compare-swiper-vertical:hover::before
-		) {
-		border-color: transparent #1f2937 transparent transparent; /* gray-800 */
-	}
-	:global(
-			#compare-container
-				.maplibregl-compare
-				.compare-swiper-vertical:hover::after
-		) {
-		border-color: transparent transparent transparent #1f2937; /* gray-800 */
-	}
-
-	/* Add custom arrows for horizontal swiper */
-	:global(
-			#compare-container
-				.maplibregl-compare
-				.compare-swiper-horizontal::before
-		),
-	:global(
-			#compare-container
-				.maplibregl-compare
-				.compare-swiper-horizontal::after
-		) {
-		content: "";
-		position: absolute;
-		width: 0;
-		height: 0;
-		border-style: solid;
-		left: 50%;
-		transform: translateX(-50%);
-		transition: border-color 0.15s ease-in-out;
-	}
-	:global(
-			#compare-container
-				.maplibregl-compare
-				.compare-swiper-horizontal::before
-		) {
-		/* Top arrow */
-		border-width: 0 5px 6px 5px; /* left/right bottom left/right */
-		border-color: transparent transparent #4b5563 transparent; /* gray-600 */
-		top: 8px;
-	}
-	:global(
-			#compare-container
-				.maplibregl-compare
-				.compare-swiper-horizontal::after
-		) {
-		/* Bottom arrow */
-		border-width: 6px 5px 0 5px;
-		border-color: #4b5563 transparent transparent transparent; /* gray-600 */
-		bottom: 8px;
-	}
-	:global(
-			#compare-container
-				.maplibregl-compare
-				.compare-swiper-horizontal:hover::before
-		) {
-		border-color: transparent transparent #1f2937 transparent; /* gray-800 */
-	}
-	:global(
-			#compare-container
-				.maplibregl-compare
-				.compare-swiper-horizontal:hover::after
-		) {
-		border-color: #1f2937 transparent transparent transparent; /* gray-800 */
-	}
-
-	/* Style for the title in popup */
-	/* Style for the title in popup */
-	:global(.custom-map-tooltip strong) {
+	:global(.map-tooltip-content strong) {
 		display: block;
 		font-weight: 600;
-		margin-bottom: 2px;
-		font-size: 12px;
-		color: #fff; /* Keep title white */
+		margin-bottom: 1px;
+		font-size: 13px;
+		color: #fff;
 	}
-
-	/* Style for the value in popup - ADJUSTED COLOR */
-	:global(.custom-map-tooltip span) {
+	:global(.map-tooltip-content span) {
 		display: block;
-		/* Use a lighter gray for better contrast on the dark background */
-		color: #d1d5db; /* Tailwind's gray-300 */
+		color: #e5e7eb;
 		font-size: 11px;
-	}
-
-	.relative {
-		position: relative;
-	}
-
-	/* Fade in maps */
-	.relative {
-		position: relative;
-	}
-	.opacity-0 {
-		opacity: 0;
-	}
-	.transition-opacity {
-		transition-property: opacity;
-	}
-	.duration-500 {
-		transition-duration: 500ms;
-	}
-	.ease-in-out {
-		transition-timing-function: ease-in-out;
-	}
-
-	/* Navigation Control Styling */
-	:global(.maplibregl-ctrl-top-right) {
-		margin: 10px 10px 0 0;
-		z-index: 5;
-	}
-	:global(.maplibregl-ctrl-group) {
-		background: #fff !important;
-		border-radius: 4px !important;
-		box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1) !important;
-		border: none !important;
-		overflow: hidden;
-	}
-	:global(.maplibregl-ctrl-group button) {
-		width: 30px !important;
-		height: 30px !important;
-		background-color: transparent !important;
-		display: flex !important;
-		align-items: center !important;
-		justify-content: center !important;
-		color: #333 !important;
-		opacity: 1;
-		cursor: pointer;
-		transition: background-color 0.1s ease-in-out;
-	}
-	:global(.maplibregl-ctrl-group button:hover) {
-		background-color: #f0f0f0 !important;
-		color: #000 !important;
-	}
-	:global(.maplibregl-ctrl-group button:focus) {
-		outline: none;
-		box-shadow: none;
-	}
-	:global(.maplibregl-ctrl-group button:disabled) {
-		cursor: not-allowed;
-		color: #aaa !important;
-		background-color: transparent !important;
-	}
-	:global(.maplibregl-ctrl-group button + button) {
-		border-top: 1px solid rgba(0, 0, 0, 0.1) !important;
-	}
-	:global(.maplibregl-ctrl-icon) {
-		background-image: none !important;
-		width: 18px;
-		height: 18px;
-		background-repeat: no-repeat;
-		background-position: center;
-		background-size: contain;
-	}
-	:global(.maplibregl-ctrl-zoom-in .maplibregl-ctrl-icon) {
-		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath fill='%23333' d='M9,4.5a.75.75,0,0,1,.75.75v3h3a.75.75,0,0,1,0,1.5h-3v3a.75.75,0,0,1-1.5,0v-3h-3a.75.75,0,0,1,0-1.5h3v-3A.75.75,0,0,1,9,4.5z'/%3E%3C/svg%3E") !important;
-	}
-	:global(.maplibregl-ctrl-zoom-out .maplibregl-ctrl-icon) {
-		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath fill='%23333' d='M4.5,8.25a.75.75,0,0,1,.75-.75h7.5a.75.75,0,0,1,0,1.5h-7.5A.75.75,0,0,1,4.5,8.25z'/%3E%3C/svg%3E") !important;
-	}
-	:global(
-			#compare-container
-				.maplibregl-compare-left
-				.maplibregl-ctrl-top-right
-		) {
-		opacity: 0.5;
-		pointer-events: none;
-	}
-	:global(
-			#compare-container
-				.maplibregl-compare-right
-				.maplibregl-ctrl-top-right
-		) {
-		opacity: 1;
-		pointer-events: auto;
 	}
 </style>

@@ -4,8 +4,9 @@
 	export let n: number = 0;
 	export let isLoading: boolean = false;
 
-	function getCorrelationStrength(r: number | null): string {
-		if (r === null || isNaN(r)) return "text-gray-600"; // Handle NaN
+	// Determine color based on correlation strength
+	function getCorrelationStrengthClass(r: number | null): string {
+		if (r === null || isNaN(r)) return "text-gray-600";
 		const absR = Math.abs(r);
 		if (absR >= 0.7) return "text-emerald-700"; // Strong
 		if (absR >= 0.4) return "text-sky-700"; // Moderate
@@ -13,49 +14,54 @@
 		return "text-gray-600"; // Very Weak / None
 	}
 
-	function getRSquaredStrength(r2: number | null): string {
-		if (r2 === null || isNaN(r2)) return "text-gray-600"; // Handle NaN
-		if (r2 >= 0.5) return "text-emerald-700"; // Strong
-		if (r2 >= 0.16) return "text-sky-700"; // Moderate
-		if (r2 >= 0.01) return "text-amber-700"; // Weak
+	// Determine color based on R-squared strength
+	function getRSquaredStrengthClass(r2: number | null): string {
+		if (r2 === null || isNaN(r2)) return "text-gray-600";
+		if (r2 >= 0.5) return "text-emerald-700"; // Strong explanation
+		if (r2 >= 0.16) return "text-sky-700"; // Moderate explanation
+		if (r2 >= 0.01) return "text-amber-700"; // Weak explanation
 		return "text-gray-600"; // Very Weak / None
 	}
 </script>
 
 <div
-	class="text-center text-xs px-2 min-h-[20px] flex items-center justify-center"
+	class="flex min-h-[20px] items-center justify-center px-2 text-center text-xs"
 >
 	{#if isLoading}
-		<span class="text-gray-500 italic">Calculating statistics...</span>
+		<span class="italic text-gray-500">Calculating statistics...</span>
+	{:else if n === 0}
+		<span class="italic text-gray-500">No valid data points found</span>
+	{:else if n < 5}
+		<span class="italic text-gray-500">
+			N={n.toLocaleString()} (Insufficient data for correlation)
+		</span>
 	{:else if pearsonR !== null && !isNaN(pearsonR) && rSquared !== null && !isNaN(rSquared)}
-		<div class="flex items-center space-x-3 text-gray-600">
+		<div
+			class="flex flex-wrap items-center justify-center gap-x-3 text-gray-600"
+		>
 			<span>
 				Correlation (r):
-				<span class="font-medium {getCorrelationStrength(pearsonR)}">
+				<span
+					class="font-medium {getCorrelationStrengthClass(pearsonR)}"
+				>
 					{pearsonR.toFixed(2)}
 				</span>
 			</span>
-			<span class="text-gray-300">|</span>
+			<span class="hidden text-gray-300 sm:inline">|</span>
 			<span>
 				R²:
-				<span class="font-medium {getRSquaredStrength(rSquared)}">
+				<span class="font-medium {getRSquaredStrengthClass(rSquared)}">
 					{rSquared.toFixed(2)}
 				</span>
 			</span>
-			<span class="text-gray-300">|</span>
+			<span class="hidden text-gray-300 sm:inline">|</span>
 			<span
 				>N: <span class="font-medium text-gray-700"
 					>{n.toLocaleString()}</span
 				></span
 			>
 		</div>
-	{:else if n > 0 && n < 5}
-		<span class="text-gray-500 italic">
-			N={n.toLocaleString()} (Insufficient data for correlation)
-		</span>
-	{:else if n === 0}
-		<span class="text-gray-500 italic">No valid data points found</span>
 	{:else}
-		<span class="text-gray-500 italic">Correlation not calculated</span>
+		<span class="italic text-gray-500">Correlation not calculated</span>
 	{/if}
 </div>

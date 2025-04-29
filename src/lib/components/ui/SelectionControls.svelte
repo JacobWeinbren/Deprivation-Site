@@ -1,22 +1,13 @@
 <script lang="ts">
-	import type {
-		MetricOption,
-		PartyOption,
-	} from "$lib/components/scatter/types"; // Corrected import path
+	import type { MetricOption, PartyOption } from "$lib/types";
 
-	// Props
 	export let selectedParty: string = "";
 	export let selectedMetric: string = "";
 	export let metrics: MetricOption[] = [];
 	export let parties: PartyOption[] = [];
 
-	// Prepare grouped metrics for dropdown
-	let orderedGroupedMetrics: {
-		groupName: string;
-		options: { value: string; label: string }[];
-	}[] = [];
-
-	$: {
+	// Prepare grouped metrics for the dropdown
+	$: groupedMetrics = (() => {
 		const groupMap = new Map<string, { value: string; label: string }[]>();
 		const groupOrder: string[] = [];
 		metrics.forEach((metric) => {
@@ -24,7 +15,6 @@
 			if (!groupMap.has(group)) {
 				groupMap.set(group, []);
 				if (!groupOrder.includes(group)) {
-					// Ensure unique group order
 					groupOrder.push(group);
 				}
 			}
@@ -32,27 +22,27 @@
 				.get(group)
 				?.push({ value: metric.value, label: metric.label });
 		});
-		orderedGroupedMetrics = groupOrder.map((groupName) => ({
+		return groupOrder.map((groupName) => ({
 			groupName,
 			options: groupMap.get(groupName) || [],
 		}));
-	}
+	})();
 </script>
 
-<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end text-sm">
-	<!-- Party Selection -->
+<div class="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+	<!-- Party/Swing Selection -->
 	<div>
 		<label
-			for="party-select-page"
-			class="block text-xs font-medium text-gray-600 mb-1.5"
+			for="party-select"
+			class="mb-1.5 block text-xs font-medium text-gray-600"
 		>
-			Party / Left Map
+			Party / Swing / Left Map
 		</label>
 		<div class="relative">
 			<select
-				id="party-select-page"
+				id="party-select"
 				bind:value={selectedParty}
-				class="block w-full pl-3 pr-8 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm appearance-none focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out hover:border-gray-400"
+				class="block w-full appearance-none rounded-md border border-gray-300 bg-white py-2 pl-3 pr-8 text-sm shadow-sm transition duration-150 ease-in-out hover:border-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
 			>
 				{#each parties as party (party.value)}
 					<option value={party.value}>{party.label}</option>
@@ -62,7 +52,7 @@
 				class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400"
 			>
 				<svg
-					class="w-4 h-4"
+					class="h-4 w-4"
 					fill="none"
 					stroke="currentColor"
 					viewBox="0 0 24 24"
@@ -81,18 +71,18 @@
 	<!-- Metric Selection -->
 	<div>
 		<label
-			for="metric-select-page"
-			class="block text-xs font-medium text-gray-600 mb-1.5"
+			for="metric-select"
+			class="mb-1.5 block text-xs font-medium text-gray-600"
 		>
 			Metric / Right Map
 		</label>
 		<div class="relative">
 			<select
-				id="metric-select-page"
+				id="metric-select"
 				bind:value={selectedMetric}
-				class="block w-full pl-3 pr-8 py-2 text-sm bg-white border border-gray-300 rounded-md shadow-sm appearance-none focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out hover:border-gray-400"
+				class="block w-full appearance-none rounded-md border border-gray-300 bg-white py-2 pl-3 pr-8 text-sm shadow-sm transition duration-150 ease-in-out hover:border-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
 			>
-				{#each orderedGroupedMetrics as groupInfo (groupInfo.groupName)}
+				{#each groupedMetrics as groupInfo (groupInfo.groupName)}
 					<optgroup label={groupInfo.groupName}>
 						{#each groupInfo.options as metric (metric.value)}
 							<option value={metric.value}>{metric.label}</option>
@@ -104,7 +94,7 @@
 				class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400"
 			>
 				<svg
-					class="w-4 h-4"
+					class="h-4 w-4"
 					fill="none"
 					stroke="currentColor"
 					viewBox="0 0 24 24"
@@ -122,7 +112,6 @@
 </div>
 
 <style>
-	/* Keep optgroup styles for better readability */
 	select optgroup {
 		font-weight: 500;
 		font-style: normal;
@@ -132,7 +121,6 @@
 		font-size: 0.8rem;
 		margin-top: 4px;
 	}
-
 	select optgroup option {
 		font-weight: normal;
 		background-color: #ffffff;

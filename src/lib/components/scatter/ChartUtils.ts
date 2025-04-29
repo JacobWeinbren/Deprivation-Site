@@ -1,3 +1,5 @@
+import { formatDisplayValue } from "$lib/utils"; // Use centralized formatter
+
 export interface ResponsiveFontSizes {
 	titleSize: number;
 	axisTitleSize: number;
@@ -6,11 +8,12 @@ export interface ResponsiveFontSizes {
 	tooltipBodySize: number;
 }
 
+// Define font sizes for different breakpoints
 const DEFAULT_FONT_SIZES: ResponsiveFontSizes = {
 	titleSize: 16,
 	axisTitleSize: 12,
 	tickSize: 10,
-	tooltipTitleSize: 13,
+	tooltipTitleSize: 12, // Slightly smaller tooltip title
 	tooltipBodySize: 11,
 };
 const SMALL_FONT_SIZES: ResponsiveFontSizes = {
@@ -23,41 +26,25 @@ const SMALL_FONT_SIZES: ResponsiveFontSizes = {
 
 /**
  * Calculate appropriate font sizes based on container width.
- * GUARANTEES to return a valid ResponsiveFontSizes object.
+ * Returns a valid ResponsiveFontSizes object.
  */
 export function getResponsiveFontSizes(
 	width: number | null | undefined,
 	smallBreakpoint = 640
 ): ResponsiveFontSizes {
-	if (typeof width !== "number" || !isFinite(width) || width <= 0) {
-		return { ...DEFAULT_FONT_SIZES }; // Return a copy
-	}
-	const isSmall = width < smallBreakpoint;
-	return isSmall ? { ...SMALL_FONT_SIZES } : { ...DEFAULT_FONT_SIZES }; // Return copies
+	const validWidth = typeof width === "number" && isFinite(width) ? width : 0;
+	const isSmall = validWidth > 0 && validWidth < smallBreakpoint;
+	// Return copies to prevent mutation
+	return isSmall ? { ...SMALL_FONT_SIZES } : { ...DEFAULT_FONT_SIZES };
 }
 
 /**
- * Format a label based on its context and value
+ * Wrapper function for formatting legend/axis labels using the central formatter.
+ * Kept for potential future chart-specific formatting rules.
  */
-export function formatLegendLabel(value: number | null, label: string): string {
-	if (value === null || value === undefined) return "N/A";
-	const numValue = Number(value);
-	if (isNaN(numValue)) return "N/A";
-	if (label.includes("(%)") || label.includes("Voteshare")) {
-		if (numValue >= 0 && numValue <= 1 && !label.includes("%")) {
-			return `${(numValue * 100).toFixed(1)}%`;
-		}
-		return `${numValue.toFixed(1)}%`;
-	}
-	if (label.includes("(£)")) {
-		return numValue >= 1000
-			? `£${(numValue / 1000).toFixed(0)}k`
-			: `£${numValue.toLocaleString(undefined, {
-					maximumFractionDigits: 0,
-			  })}`;
-	}
-	if (Math.abs(numValue) < 1 && numValue !== 0) return numValue.toFixed(2);
-	if (Math.abs(numValue) < 10) return numValue.toFixed(1);
-	if (Math.abs(numValue) >= 10000) return (numValue / 1000).toFixed(0) + "k";
-	return numValue.toLocaleString(undefined, { maximumFractionDigits: 0 });
+export function formatChartLabel(
+	value: number | null | undefined,
+	labelContext: string = ""
+): string {
+	return formatDisplayValue(value, labelContext);
 }

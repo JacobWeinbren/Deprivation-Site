@@ -4,18 +4,15 @@ import type {
 	Point,
 	TooltipCallbacks,
 	FontSpec,
-} from "chart.js";
-import type { ConstituencyData, MetricOption, PartyOption } from "./types";
-import { getNumericValue } from "./utils";
-import { getResponsiveFontSizes, formatLegendLabel } from "./ChartUtils";
-// Import map constants for colors (Orange-Yellow-Blue scheme)
-import {
-	metricQuintileColors,
-	NO_DATA_COLOR,
-} from "$lib/components/map/MapConstants";
-
-// Define types for simple-statistics if not using global window.ss
-type SimpleStatistics = typeof import("simple-statistics");
+	ChartJSChart, // Use renamed type
+	ConstituencyData,
+	MetricOption,
+	PartyOption,
+	SimpleStatistics,
+} from "$lib/types";
+import { getNumericValue } from "$lib/utils";
+import { getResponsiveFontSizes, formatChartLabel } from "./chartUtils";
+import { metricQuintileColors, NO_DATA_COLOR } from "$lib/config"; // Use central config
 
 export interface ProcessedChartData {
 	plotPoints: (Point & { label: string; id: string })[]; // Points actually plotted
@@ -33,146 +30,94 @@ export interface ProcessedChartData {
  */
 export function processChartData(
 	data: ConstituencyData[],
-	selectedMetric: string, // Variable for X-axis
-	selectedParty: string, // Variable for Y-axis (can be party or swing)
-	ss: SimpleStatistics // Pass ss library instance
+	selectedMetric: string,
+	selectedParty: string,
+	ss: SimpleStatistics
 ): ProcessedChartData {
-	const plotPoints: (Point & { label: string; id: string })[] = [];
-	const statPoints: [number, number][] = []; // Separate array for stats points
-	const sortedData = [...data].sort((a, b) =>
-		(a.const_code ?? "").localeCompare(b.const_code ?? "")
-	);
+	const plotPoints: ProcessedChartData["plotPoints"] = [];
+	const statPoints: ProcessedChartData["statPoints"] = [];
 	let pointsExcluded = 0;
-
 	const isSwingMetricX = selectedMetric === "swing_con_lab_19_24";
-	const isSwingMetricY = selectedParty === "swing_con_lab_19_24"; // Check if Y-axis is swing
-
-	for (const row of sortedData) {
+	const isSwingMetricY = selectedParty === "swing_con_lab_19_24";
+	for (const row of data) {
+		const name = row.constituency_name!;
+		const id = row.const_code!;
 		const xVal = getNumericValue(row, selectedMetric);
 		const yVal = getNumericValue(row, selectedParty);
-		const name = row.constituency_name;
-		const id = row.const_code;
-
-		// --- Filtering Logic ---
-		// Basic validity checks first
-		const hasIdentifiers = name && id;
 		const yValueValid = yVal !== null && isFinite(yVal);
 		const xValueValid = xVal !== null && isFinite(xVal);
-
-		// Determine validity for plotting based on metric type
 		let isValidXForPlot: boolean;
 		if (isSwingMetricX) {
-			// Allow any finite number (positive, negative, zero) for swing plot on X
 			isValidXForPlot = xValueValid;
 		} else {
-			// For other metrics on X, require non-negative
 			isValidXForPlot = xValueValid && xVal >= 0;
 		}
-
-		// Determine Y validity for plotting
 		let isValidYForPlot: boolean;
 		if (isSwingMetricY) {
-			// Allow any finite number (positive, negative, zero) for swing plot on Y
 			isValidYForPlot = yValueValid;
 		} else {
-			// Require positive Y for voteshare
-			isValidYForPlot = yValueValid && yVal > 0;
+			isValidYForPlot = yValueValid && yVal >= 0;
 		}
-		// --- End Filtering ---
-
-		if (isValidXForPlot && isValidYForPlot && hasIdentifiers) {
-			plotPoints.push({ x: xVal!, y: yVal!, label: name!, id: id! }); // Use non-null assertion after checks
-			// Include in stats points if both are valid numbers
+		if (isValidXForPlot && isValidYForPlot) {
+			plotPoints.push({ x: xVal!, y: yVal!, label: name, id: id });
 			if (xValueValid && yValueValid) {
-				// Use non-null assertion after checks
 				statPoints.push([xVal!, yVal!]);
 			}
 		} else {
 			pointsExcluded++;
 		}
 	}
-	if (pointsExcluded > 0) {
-		console.warn(
-			`Scatter: Excluded ${pointsExcluded} points due to invalid/missing X/Y values or identifiers based on plot criteria for ${selectedMetric} vs ${selectedParty}.`
-		);
-	}
-	if (plotPoints.length === 0 && data.length > 0) {
-		console.error(
-			`Scatter: No valid plot points generated for metric '${selectedMetric}' and party '${selectedParty}'. Check data and filtering.`
-		);
-	}
-
-	// --- Statistical Calculations (Using statPoints) ---
 	let pearsonR: number | null = null;
 	let rSquared: number | null = null;
 	let regressionLinePoints: Point[] = [];
-	const n = statPoints.length; // Number of points used for stats
-
-	// --- Calculate Metric (X-axis) Quantiles ---
+	const n = statPoints.length;
 	let xValuesForQuantiles: number[];
 	if (isSwingMetricX) {
-		// For swing on X, calculate quantiles across the whole range
 		xValuesForQuantiles = statPoints.map((p) => p[0]);
 	} else {
-		// For other metrics on X, exclude 0 from quantile calculation range if desired
 		xValuesForQuantiles = statPoints.map((p) => p[0]).filter((x) => x > 0);
 	}
 	xValuesForQuantiles.sort((a, b) => a - b);
 	let metricQuantiles: number[] = [];
 	if (xValuesForQuantiles.length >= 5) {
-		const p = (percent: number) => {
-			const index = Math.max(
-				0,
-				Math.min(
-					xValuesForQuantiles.length - 1,
-					Math.floor(
-						(percent / 100) * (xValuesForQuantiles.length - 1)
-					)
-				)
-			);
-			return xValuesForQuantiles[index];
-		};
-		metricQuantiles = [p(20), p(40), p(60), p(80)];
+		metricQuantiles = [20, 40, 60, 80].map((p) =>
+			ss.quantile(xValuesForQuantiles, p / 100)
+		);
 	}
-	// --- End Quantile Calculation ---
-
-	// --- Regression Calculation ---
 	if (n >= 5) {
-		// Use 'n' (count of points valid for stats)
 		try {
 			const xValues = statPoints.map((p) => p[0]);
 			const yValues = statPoints.map((p) => p[1]);
 			const xStdDev = ss.standardDeviation(xValues);
 			const yStdDev = ss.standardDeviation(yValues);
-
-			// Check for variance before calculating correlation/regression
 			if (xStdDev > 0 && yStdDev > 0) {
-				const regression = ss.linearRegression(statPoints);
-				const regressionFunction = ss.linearRegressionLine(regression);
 				pearsonR = ss.sampleCorrelation(xValues, yValues);
 				rSquared = pearsonR * pearsonR;
-
-				// Generate regression line points across the observed range of X values used in stats
+				const regression = ss.linearRegression(statPoints);
+				const regressionFunction = ss.linearRegressionLine(regression);
 				const xMin = ss.min(xValues);
 				const xMax = ss.max(xValues);
-				const numPoints = 20;
+				const numLinePoints = Math.max(2, Math.min(20, n));
 				const xStep =
-					numPoints > 1 && xMax > xMin
-						? (xMax - xMin) / (numPoints - 1)
+					numLinePoints > 1 && xMax > xMin
+						? (xMax - xMin) / (numLinePoints - 1)
 						: 0;
-
-				for (let i = 0; i < numPoints; i++) {
+				for (let i = 0; i < numLinePoints; i++) {
 					const x = xMin + i * xStep;
 					const y = regressionFunction(x);
 					if (isFinite(x) && isFinite(y)) {
 						regressionLinePoints.push({ x, y });
 					}
 				}
-				if (regressionLinePoints.length < 2) regressionLinePoints = []; // Need at least 2 points for a line
-			} else {
-				console.warn(
-					"Scatter: Cannot calculate correlation/regression with constant X or Y values."
-				);
+				if (
+					regressionLinePoints.length < 2 ||
+					(regressionLinePoints.length === 2 &&
+						regressionLinePoints[0].x ===
+							regressionLinePoints[1].x &&
+						regressionLinePoints[0].y === regressionLinePoints[1].y)
+				) {
+					regressionLinePoints = [];
+				}
 			}
 		} catch (statError) {
 			console.error(
@@ -181,292 +126,206 @@ export function processChartData(
 			);
 			pearsonR = null;
 			rSquared = null;
-			regressionLinePoints = []; // Reset on error
+			regressionLinePoints = [];
 		}
-	} else if (n > 0) {
-		// Log only if there were *some* points but not enough
-		console.warn(
-			`Scatter: Not enough valid data points (${n}) for correlation.`
-		);
 	}
-
 	return {
-		plotPoints, // Points actually plotted
-		statPoints, // Points used for stats
+		plotPoints,
+		statPoints,
 		pearsonR,
 		rSquared,
-		n, // Count of points used for stats
+		n,
 		regressionLinePoints,
-		metricQuantiles, // Quantiles based on X-axis
-		xValuesForQuantiles, // Values used for X-axis quantiles
+		metricQuantiles,
+		xValuesForQuantiles,
 	};
 }
 
 /**
- * Generates the Chart.js configuration object based on processed data and props.
+ * Generates the Chart.js configuration object.
  */
 export function generateChartConfig(
 	processedData: ProcessedChartData,
 	props: {
-		selectedParty: string; // Y-axis variable (party or swing)
-		selectedMetric: string; // X-axis variable
+		selectedParty: string;
+		selectedMetric: string;
 		metrics: MetricOption[];
 		parties: PartyOption[];
-		partyColors: { [key: string]: string };
-		title: string;
 		compact: boolean;
 		containerWidth: number;
 	},
 	onPointClick: (name: string) => void
 ): ChartConfiguration<"scatter"> {
-	// Specify chart type for better typing
-
 	const {
 		plotPoints,
 		regressionLinePoints,
 		metricQuantiles,
 		xValuesForQuantiles,
-	} = processedData; // Get quantiles for X-axis metric
+	} = processedData;
 	const {
 		selectedParty,
 		selectedMetric,
 		metrics,
 		parties,
-		partyColors, // Still needed for potential hover effects or fallbacks if desired
-		title,
 		compact,
 		containerWidth,
 	} = props;
 
-	// --- Font Size Calculation with Safety ---
-	const validContainerWidth = Math.max(containerWidth || 0, 1);
-	let fontSizes = getResponsiveFontSizes(validContainerWidth);
-	if (
-		!fontSizes ||
-		typeof fontSizes.tooltipBodySize !== "number" ||
-		typeof fontSizes.tooltipTitleSize !== "number"
-	) {
-		console.warn(
-			"generateChartConfig: Invalid fontSizes calculated, using defaults."
-		);
-		fontSizes = {
-			titleSize: compact ? 14 : 16,
-			axisTitleSize: compact ? 11 : 12,
-			tickSize: compact ? 9 : 10,
-			tooltipTitleSize: compact ? 11 : 13,
-			tooltipBodySize: compact ? 10 : 11,
-		};
-	}
-	// --- End Font Size Calculation ---
+	// *** Define isSwingMetricY here based on props ***
+	const isSwingMetricY = selectedParty === "swing_con_lab_19_24";
+	// We don't need isSwingMetricX in this function scope
 
-	// Get labels for axes
+	const fontSizes = getResponsiveFontSizes(containerWidth);
+
 	const selectedPartyLabel =
 		parties.find((p) => p.value === selectedParty)?.label || selectedParty;
 	const selectedMetricLabel =
 		metrics.find((m) => m.value === selectedMetric)?.label ||
 		selectedMetric;
 
-	// --- Calculate Point Colors based on Metric (X-value) ---
+	// Calculate Point Colors based on Metric (X-value) Quantiles
 	const pointBackgroundColors = plotPoints.map((point) => {
-		const value = point.x; // Use the metric value (X)
+		const value = point.x;
+		// Check if X-axis is swing (needed for zero handling)
 		const isSwingMetricX = selectedMetric === "swing_con_lab_19_24";
 
-		// Apply NO_DATA_COLOR only if value is strictly null/undefined? Or keep 0 as NO_DATA?
-		// Let's keep 0 as NO_DATA for non-swing metrics for visual consistency with map
-		if (!isSwingMetricX && value === 0) return NO_DATA_COLOR;
-		// If value is null/undefined (shouldn't happen due to plotPoints filter, but safe check)
 		if (value === null || value === undefined) return NO_DATA_COLOR;
+		if (!isSwingMetricX && value === 0) return NO_DATA_COLOR;
 
-		// Handle case with insufficient data for quantiles
-		if (metricQuantiles.length < 4) {
+		if (metricQuantiles.length < 4 || xValuesForQuantiles.length < 5) {
 			if (
 				xValuesForQuantiles.length < 2 ||
 				xValuesForQuantiles[xValuesForQuantiles.length - 1] <=
 					xValuesForQuantiles[0]
 			) {
-				return metricQuintileColors[2]; // Middle color if no range or too few points
+				return metricQuintileColors[2];
 			} else {
-				// Basic interpolation logic (similar to map)
 				const min = xValuesForQuantiles[0];
 				const max = xValuesForQuantiles[xValuesForQuantiles.length - 1];
 				const ratio = Math.max(
 					0,
 					Math.min(1, (value - min) / (max - min))
 				);
-				const colorIndex = Math.min(4, Math.floor(ratio * 5));
+				const colorIndex = Math.max(
+					0,
+					Math.min(4, Math.floor(ratio * 5))
+				);
 				return metricQuintileColors[colorIndex];
 			}
 		} else {
-			// Use calculated quantiles
 			if (value < metricQuantiles[0]) return metricQuintileColors[0];
 			if (value < metricQuantiles[1]) return metricQuintileColors[1];
 			if (value < metricQuantiles[2]) return metricQuintileColors[2];
 			if (value < metricQuantiles[3]) return metricQuintileColors[3];
-			return metricQuintileColors[4]; // Includes values >= quintiles[3]
+			return metricQuintileColors[4];
 		}
 	});
-	// --- End Point Color Calculation ---
 
 	const defaultPointSize = compact ? 2.5 : 3;
-	const pointSizes = plotPoints.map(() => defaultPointSize);
-	const pointBorderColors = plotPoints.map(() => "transparent");
-	const pointBorderWidths = plotPoints.map(() => 0);
+	const pointHoverSize = compact ? 5 : 6;
 
 	const datasets: ChartConfiguration<"scatter">["data"]["datasets"] = [
 		{
 			label: "Constituencies",
-			data: plotPoints, // Pass full objects
-			parsing: { xAxisKey: "x", yAxisKey: "y" },
-			backgroundColor: pointBackgroundColors, // Use the calculated color array based on X-metric
-			borderColor: pointBorderColors, // Initial state, highlight updates separately
-			borderWidth: pointBorderWidths, // Initial state
-			pointRadius: pointSizes, // Initial state
-			pointHoverRadius: compact ? 5 : 6,
+			data: plotPoints,
+			parsing: false,
+			backgroundColor: pointBackgroundColors,
+			borderColor: "transparent",
+			borderWidth: 0,
+			pointRadius: defaultPointSize,
+			pointHoverRadius: pointHoverSize,
 			pointHitRadius: compact ? 8 : 10,
 			pointHoverBorderWidth: 1.5,
-			pointHoverBackgroundColor: pointBackgroundColors, // Keep original color on hover
-			pointHoverBorderColor: "#000000", // Use black border on hover
+			pointHoverBackgroundColor: (context: any) =>
+				context.dataset.backgroundColor[context.dataIndex],
+			pointHoverBorderColor: "#000000",
 			order: 1,
 		},
 	];
 
 	if (regressionLinePoints.length > 1) {
 		datasets.push({
-			type: "line", // Specify type for mixed chart
+			type: "line",
 			label: "Trend",
 			data: regressionLinePoints,
+			parsing: false,
 			backgroundColor: "transparent",
-			borderColor: "rgba(0, 0, 0, 0.4)", // Semi-transparent black
-			borderWidth: 1.5, // Slightly thicker dashed line
-			borderDash: [4, 4], // Dashed line style
-			pointRadius: 0, // No visible points on the line itself
-			fill: false, // Don't fill area under the line
-			tension: 0.1, // Slight curve to the line
-			order: 0, // Render line underneath points
+			borderColor: "rgba(0, 0, 0, 0.4)",
+			borderWidth: 1.5,
+			borderDash: [4, 4],
+			pointRadius: 0,
+			fill: false,
+			tension: 0.1,
+			order: 0,
 			pointHitRadius: 0,
 			pointHoverRadius: 0,
-			hitRadius: 0,
-			hoverRadius: 0, // Non-interactive
 		});
 	}
 
-	const chartTitleText =
-		title || `${selectedPartyLabel} vs ${selectedMetricLabel}`;
-
-	// --- Formatters ---
-	const formatXAxisTick = (value: number | string): string => {
-		const numValue = Number(value);
-		if (isNaN(numValue)) return String(value);
-		return formatLegendLabel(numValue, selectedMetricLabel);
-	};
-	const formatYAxisTick = (value: number | string): string => {
-		const numValue = Number(value);
-		if (isNaN(numValue)) return String(value);
-		// Check if the Y-axis variable is swing
-		if (selectedParty === "swing_con_lab_19_24") {
-			return `${numValue.toFixed(1)}%`; // Show swing with one decimal and %
-		} else {
-			// Assume other Y-axis variables are standard percentages
-			return `${numValue.toFixed(0)}%`;
-		}
-	};
-
-	// --- Tooltip Callbacks (Restored Style) ---
+	// Tooltip Callbacks
 	const tooltipCallbacks: Partial<TooltipCallbacks<"scatter">> = {
 		title: (tooltipItems: any[]) => {
-			// Title is Constituency Name
-			if (tooltipItems.length > 0) {
-				const item = tooltipItems[0];
-				const index = item.dataIndex;
-				if (
-					item.datasetIndex === 0 &&
-					index >= 0 &&
-					index < plotPoints.length
-				) {
-					return plotPoints[index].label;
-				}
-			}
-			return "";
+			const item = tooltipItems[0];
+			return item?.raw?.label ?? "";
 		},
 		label: (context: any) => {
-			// Body lines are Metric and Party/Swing
-			const index = context.dataIndex;
-			if (
-				context.datasetIndex === 0 &&
-				index >= 0 &&
-				index < plotPoints.length
-			) {
-				const point = plotPoints[index];
-				const xFormatted = formatLegendLabel(
-					point.x,
-					selectedMetricLabel
-				);
-				// Use formatLegendLabel for Y value for consistency (handles % sign)
-				const yFormatted = formatLegendLabel(
-					point.y,
-					selectedPartyLabel
-				);
-				return [
-					`${selectedMetricLabel
-						.split("(")[0]
-						.trim()}: ${xFormatted}`,
-					`${selectedPartyLabel.split("(")[0].trim()}: ${yFormatted}`,
-				];
-			}
-			return null; // Return null if not applicable
+			const point = context.raw as Point & { label: string; id: string };
+			if (!point) return null;
+			const xFormatted = formatChartLabel(point.x, selectedMetricLabel);
+			const yFormatted = formatChartLabel(point.y, selectedPartyLabel);
+			return [
+				`${selectedMetricLabel.split("(")[0].trim()}: ${xFormatted}`,
+				`${selectedPartyLabel.split("(")[0].trim()}: ${yFormatted}`,
+			];
 		},
 	};
 
-	// --- Chart Options ---
+	// Chart Options
 	const options: ChartOptions<"scatter"> = {
-		// Add type annotation
 		responsive: true,
 		maintainAspectRatio: false,
-		animation: false, // NO ANIMATION
+		animation: false,
 		layout: {
 			padding: compact
-				? { top: 5, right: 5, bottom: 5, left: 0 }
-				: { top: 10, right: 15, bottom: 5, left: 5 },
+				? { top: 4, right: 4, bottom: 4, left: 0 }
+				: { top: 8, right: 10, bottom: 5, left: 5 },
 		},
 		interaction: {
 			mode: "nearest",
 			axis: "xy",
-			// *** Require direct intersection for tooltip ***
 			intersect: true,
 		},
 		plugins: {
 			legend: { display: false },
 			tooltip: {
 				enabled: true,
-				// Restore previous style matching map tooltip
 				backgroundColor: "rgba(0, 0, 0, 0.85)",
-				titleColor: "#ffffff", // White title
-				bodyColor: "#d1d5db", // Lighter grey body
+				titleColor: "#ffffff",
+				bodyColor: "#e5e7eb",
 				borderColor: "transparent",
 				borderWidth: 0,
 				padding: compact ? 6 : 8,
 				cornerRadius: 4,
-				displayColors: false, // Hide color boxes
-				// Use distinct title and body font sizes again
+				displayColors: false,
 				titleFont: {
-					weight: "bold",
-					size: fontSizes.tooltipTitleSize, // Use specific title size
+					weight: "600",
+					size: fontSizes.tooltipTitleSize,
 				} as Partial<FontSpec>,
 				bodyFont: {
-					size: fontSizes.tooltipBodySize, // Use specific body size
+					size: fontSizes.tooltipBodySize,
 				} as Partial<FontSpec>,
-				callbacks: tooltipCallbacks, // Assign the restored callbacks
+				callbacks: tooltipCallbacks,
 				filter: (tooltipItem: any) => tooltipItem.datasetIndex === 0,
 			},
 			title: {
-				display: !compact && !!chartTitleText,
-				text: chartTitleText,
+				display: !compact,
+				text: `${selectedPartyLabel} vs ${selectedMetricLabel}`,
 				align: "start",
 				padding: { top: 0, bottom: compact ? 10 : 15 },
 				font: {
-					size: fontSizes.titleSize, // Use checked/defaulted fontSizes
+					size: fontSizes.titleSize,
 					weight: "500",
-					family: "system-ui, sans-serif",
+					family: "Inter var, Inter, sans-serif",
 				},
 				color: "#111827",
 			},
@@ -479,8 +338,8 @@ export function generateChartConfig(
 					display: true,
 					text: selectedMetricLabel,
 					font: {
-						size: fontSizes.axisTitleSize, // Use checked/defaulted fontSizes
-						family: "system-ui, sans-serif",
+						size: fontSizes.axisTitleSize,
+						family: "Inter var, Inter, sans-serif",
 						weight: "normal",
 					},
 					color: "#4B5563",
@@ -489,22 +348,24 @@ export function generateChartConfig(
 				grid: { color: "#E5E7EB", drawBorder: false },
 				ticks: {
 					color: "#6B7280",
-					font: { size: fontSizes.tickSize }, // Use checked/defaulted fontSizes
+					font: { size: fontSizes.tickSize },
 					maxTicksLimit: compact ? 4 : 6,
 					padding: 5,
-					callback: formatXAxisTick,
+					callback: (value) =>
+						formatChartLabel(Number(value), selectedMetricLabel),
 				},
 			},
 			y: {
 				type: "linear",
 				position: "left",
-				beginAtZero: true,
+				// *** Use the locally defined isSwingMetricY ***
+				beginAtZero: !isSwingMetricY,
 				title: {
 					display: true,
 					text: selectedPartyLabel,
 					font: {
-						size: fontSizes.axisTitleSize, // Use checked/defaulted fontSizes
-						family: "system-ui, sans-serif",
+						size: fontSizes.axisTitleSize,
+						family: "Inter var, Inter, sans-serif",
 						weight: "normal",
 					},
 					color: "#4B5563",
@@ -513,71 +374,76 @@ export function generateChartConfig(
 				grid: { color: "#E5E7EB", drawBorder: false },
 				ticks: {
 					color: "#6B7280",
-					font: { size: fontSizes.tickSize }, // Use checked/defaulted fontSizes
+					font: { size: fontSizes.tickSize },
 					maxTicksLimit: compact ? 4 : 6,
 					padding: 5,
-					callback: formatYAxisTick,
+					callback: (value) =>
+						formatChartLabel(Number(value), selectedPartyLabel),
 				},
 			},
 		},
 		onClick: (_event: MouseEvent, elements: any[]) => {
 			if (!elements || elements.length === 0) return;
-			const element = elements[0];
-			if (element.datasetIndex === 0) {
+			const element = elements.find((el) => el.datasetIndex === 0);
+			if (element) {
 				const index = element.index;
-				// Use plotPoints array for safety check
 				if (
 					index !== undefined &&
 					index >= 0 &&
 					index < plotPoints.length
 				) {
-					onPointClick(plotPoints[index].label); // Use the callback
+					onPointClick(plotPoints[index].label);
 				}
 			}
 		},
 	};
 
 	return {
-		type: "scatter", // Base type
+		type: "scatter",
 		data: { datasets },
 		options: options,
 	};
 }
 
 /**
- * Applies highlight styling.
+ * Applies highlight styling (point size, border) to the chart dataset.
+ * Modifies the dataset directly.
  */
 export function applyChartHighlight(
-	dataset:
-		| ChartConfiguration<"scatter">["data"]["datasets"][0]
-		| null
-		| undefined,
+	dataset: ChartConfiguration<"scatter">["data"]["datasets"][0] | undefined,
 	plotPoints: ProcessedChartData["plotPoints"],
 	highlightedConstituency: string | null,
 	compact: boolean
 ) {
-	if (!dataset || !plotPoints || plotPoints.length === 0) return;
+	if (!dataset || !plotPoints || !Array.isArray(dataset.data)) return;
+
 	const defaultPointSize = compact ? 2.5 : 3;
-	const highlightedPointSize = compact ? 5 : 6;
-	const highlightBorderColor = "#1D4ED8";
+	// *** Enhanced Highlight Style ***
+	const highlightedPointSize = compact ? 7 : 8; // Significantly larger
+	const highlightBorderColor = "#0000000"; // Bright Sky Blue (Tailwind sky-500)
+	const highlightBorderWidth = 3; // Increased border width
+
 	try {
-		const radii = plotPoints.map((p) =>
+		dataset.pointRadius = plotPoints.map((p) =>
 			p.label === highlightedConstituency
 				? highlightedPointSize
 				: defaultPointSize
 		);
-		const borderColors = plotPoints.map((p) =>
-			p.label === highlightedConstituency
-				? highlightBorderColor
-				: "transparent"
+		dataset.borderColor = plotPoints.map(
+			(p) =>
+				p.label === highlightedConstituency
+					? highlightBorderColor
+					: "transparent" // Keep non-highlighted transparent
 		);
-		const borderWidths = plotPoints.map((p) =>
-			p.label === highlightedConstituency ? 1.5 : 0
+		dataset.borderWidth = plotPoints.map(
+			(p) =>
+				p.label === highlightedConstituency ? highlightBorderWidth : 0 // Apply border only to highlighted
 		);
-		dataset.pointRadius = radii;
-		dataset.borderColor = borderColors;
-		dataset.borderWidth = borderWidths;
 	} catch (e) {
-		console.error("Error preparing highlight styles:", e);
+		console.error("Error applying chart highlight styles:", e);
+		// Reset to defaults in case of error
+		dataset.pointRadius = defaultPointSize;
+		dataset.borderColor = "transparent";
+		dataset.borderWidth = 0;
 	}
 }

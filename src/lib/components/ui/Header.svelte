@@ -1,17 +1,17 @@
 <script lang="ts">
 	export let title = "British Constituency Explorer";
 	export let description =
-		"Compare 2024 General Election results with socio-economic data. Select a party and metric below, then explore the scatter plot or compare maps. Click a point or area to highlight and zoom.";
+		"Compare 2024 General Election results with socio-economic data. Select a party/swing and a metric below, then explore the scatter plot or compare maps. Click a point or area to highlight and zoom.";
 </script>
 
-<div class="mb-8 sm:mb-10 text-center">
+<div class="mb-8 text-center sm:mb-10">
 	<h1
-		class="text-2xl sm:text-3xl font-semibold text-gray-800 mb-3 sm:mb-4 tracking-tight"
+		class="mb-3 text-2xl font-semibold tracking-tight text-gray-800 sm:mb-4 sm:text-3xl"
 	>
 		{title}
 	</h1>
 	<p
-		class="text-sm sm:text-base text-gray-600 max-w-3xl mx-auto leading-relaxed"
+		class="mx-auto max-w-3xl text-sm leading-relaxed text-gray-600 sm:text-base"
 	>
 		{description}
 	</p>

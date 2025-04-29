@@ -1,10 +1,16 @@
 <script lang="ts">
-	// Import types and base utils
-	import type { ConstituencyData, MetricOption, PartyOption } from "./types";
-	import { getNumericValue, debounce } from "./utils";
-
-	// Import Chart specific utils, setup, logic
-	import { getResponsiveFontSizes } from "./ChartUtils";
+	// ... (imports and other script content remain the same) ...
+	import { onMount, onDestroy, createEventDispatcher } from "svelte";
+	import { browser } from "$app/environment";
+	import type {
+		ConstituencyData,
+		MetricOption,
+		PartyOption,
+		ChartJSChart,
+		SimpleStatistics,
+	} from "$lib/types";
+	import { debounce } from "$lib/utils";
+	import { getResponsiveFontSizes } from "./chartUtils";
 	import { loadChartLibraries } from "./chartSetup";
 	import {
 		processChartData,
@@ -12,32 +18,17 @@
 		applyChartHighlight,
 	} from "./chartLogic";
 	import type { ProcessedChartData } from "./chartLogic";
-
-	// Import UI components
 	import ChartStatistics from "./ChartStatistics.svelte";
 	import ChartPlaceholder from "./ChartPlaceholder.svelte";
-	import ChartNotes from "./ChartNotes.svelte";
-
-	// Import Chart.js type for instance
-	import type { Chart as ChartJSChart, FontSpec } from "chart.js";
-
-	import { onMount, onDestroy, createEventDispatcher } from "svelte";
 
 	// --- Props ---
 	export let data: ConstituencyData[] = [];
 	export let selectedParty: string = "lab_voteshare";
 	export let selectedMetric: string = "overall_local_score";
 	export let highlightedConstituency: string | null = null;
-	export let title: string = "";
+	export let metrics: MetricOption[] = [];
+	export let parties: PartyOption[] = [];
 	export let compact: boolean = false;
-	export let id: string = Math.random().toString(36).substring(2, 9);
-	import {
-		metrics as allMetrics,
-		parties as allParties,
-		partyColors,
-	} from "./chartConfig";
-	export let metrics: MetricOption[] = allMetrics;
-	export let parties: PartyOption[] = allParties;
 
 	// --- State ---
 	let chartContainer: HTMLDivElement;
@@ -46,67 +37,71 @@
 	let errorMessage: string | null = null;
 	let isMounted: boolean = false;
 	let chart: ChartJSChart<"scatter"> | null = null;
-	let ss: typeof import("simple-statistics") | null = null;
+	let ss: SimpleStatistics | null = null;
 	let ChartJS: typeof ChartJSChart | null = null;
 	let resizeObserver: ResizeObserver | null = null;
 	let currentProcessedData: ProcessedChartData | null = null;
-
-	// Keep track of previous prop values
 	let prevSelectedParty = selectedParty;
 	let prevSelectedMetric = selectedMetric;
-	let prevDataLength = data?.length ?? 0;
+	let prevData: ConstituencyData[] | null = null;
 	let prevHighlight = highlightedConstituency;
 
 	const dispatch = createEventDispatcher<{
 		constituencyClick: { name: string };
 	}>();
+	const logPrefix = "[Scatter]";
 
-	// --- Core Logic ---
+	// --- Core Logic (dispatchConstituencyClick, updateChart, updateHighlightOnly, handleResize) ---
+	// ... (Functions remain the same as previous version with logging) ...
 	function dispatchConstituencyClick(name: string) {
+		console.log(
+			`${logPrefix} Point clicked, dispatching event for: ${name}`
+		);
 		dispatch("constituencyClick", { name: name });
 	}
 
-	async function updateChart() {
-		// Ensure essential elements/libs are ready
+	async function updateChart(reason: string = "unknown") {
+		console.log(
+			`${logPrefix} updateChart called (reason: ${reason}). Current state: isLoading=${isLoading}, isMounted=${isMounted}, hasChart=${!!chart}, dataIsArray=${Array.isArray(
+				data
+			)}`
+		);
 		if (!isMounted || !canvas || !chartContainer || !ChartJS || !ss) {
 			console.warn(
-				"Scatter: updateChart called before mount or library load."
+				`${logPrefix} updateChart prerequisites not met (mount/libs). Bailing out.`
 			);
-			// Don't change isLoading here, wait for mount/load
 			return;
 		}
-		// Validate input data
 		if (!Array.isArray(data)) {
-			errorMessage = "Chart Error: Invalid data received.";
-			isLoading = false; // Stop loading on validation error
+			console.error(
+				`${logPrefix} updateChart called with non-array data. This shouldn't happen if reactive block logic is correct.`
+			);
+			errorMessage = "Chart Error: Invalid data state.";
+			isLoading = false;
 			if (chart) {
 				chart.destroy();
 				chart = null;
 			}
 			return;
 		}
-
-		// Reset state for update attempt
-		errorMessage = null;
-		isLoading = true;
+		if (!isLoading) {
+			console.log(`${logPrefix} Setting isLoading = true for update.`);
+			errorMessage = null;
+			isLoading = true;
+		}
 		currentProcessedData = null;
-
-		// Use requestAnimationFrame to ensure DOM is ready for width check
 		await new Promise((resolve) => requestAnimationFrame(resolve));
-
 		try {
-			const containerWidth = chartContainer.clientWidth;
-			// Check width *after* potential DOM update
+			const containerWidth = chartContainer?.clientWidth ?? 0;
 			if (containerWidth <= 0 && isMounted) {
-				errorMessage = "Chart container not ready (zero width).";
-				// *** Ensure isLoading is set false on early exit ***
-				isLoading = false;
+				console.warn(
+					`${logPrefix} Chart container not ready (zero width). Retrying...`
+				);
+				setTimeout(() => updateChart("retry zero width"), 100);
 				return;
 			}
-
-			// 1. Process Data
 			console.log(
-				`Scatter: Processing data for ${selectedMetric} vs ${selectedParty}`
+				`${logPrefix} Processing data for ${selectedMetric} vs ${selectedParty}`
 			);
 			const processed = processChartData(
 				data,
@@ -115,23 +110,25 @@
 				ss
 			);
 			currentProcessedData = processed;
-
-			// 2. Check if points were generated
+			console.log(
+				`${logPrefix} Data processed. Plot points: ${processed?.plotPoints?.length}, Stat points: ${processed?.statPoints?.length}`
+			);
 			if (!processed || processed.plotPoints.length === 0) {
 				console.warn(
-					`Scatter: No valid plot points generated for ${selectedMetric} vs ${selectedParty}.`
+					`${logPrefix} No valid plot points generated for ${selectedMetric} vs ${selectedParty}.`
 				);
 				errorMessage = `No valid data points found for the selected combination.`;
-				// *** Ensure isLoading is set false on early exit ***
 				isLoading = false;
 				if (chart) {
+					console.log(
+						`${logPrefix} Destroying existing chart as no points were generated.`
+					);
 					chart.destroy();
 					chart = null;
-				} // Destroy existing chart
+				}
 				return;
 			}
-
-			// 3. Generate Config
+			console.log(`${logPrefix} Generating chart config...`);
 			const config = generateChartConfig(
 				processed,
 				{
@@ -139,17 +136,13 @@
 					selectedMetric,
 					metrics,
 					parties,
-					partyColors,
-					title,
 					compact,
 					containerWidth,
 				},
 				dispatchConstituencyClick
 			);
-
-			// 4. Update or Create Chart
 			if (chart) {
-				console.log("Scatter: Updating existing chart instance.");
+				console.log(`${logPrefix} Updating existing chart instance.`);
 				chart.data.datasets = config.data.datasets;
 				chart.options = config.options;
 				if (chart.data.datasets[0]) {
@@ -160,9 +153,9 @@
 						compact
 					);
 				}
-				chart.update("none"); // NO ANIMATION
+				chart.update("none");
 			} else {
-				console.log("Scatter: Creating new chart instance.");
+				console.log(`${logPrefix} Creating new chart instance.`);
 				const ctx = canvas.getContext("2d");
 				if (!ctx) throw new Error("Could not get canvas context.");
 				if (config.data.datasets[0]) {
@@ -175,210 +168,252 @@
 				}
 				chart = new ChartJS(ctx, config);
 			}
-
-			// *** Set isLoading false on successful completion ***
+			console.log(
+				`${logPrefix} Chart update complete. Setting isLoading = false.`
+			);
 			isLoading = false;
-			console.log("Scatter: Chart update complete.");
+			errorMessage = null;
 		} catch (e: any) {
-			console.error("Scatter: Chart update error:", e);
+			console.error(`${logPrefix} Chart update error:`, e);
 			errorMessage = `Chart Error: ${e.message || "Unknown error during update"}`;
-			// *** Ensure isLoading is set false in catch block ***
 			isLoading = false;
 			currentProcessedData = null;
 			if (chart) {
+				console.log(
+					`${logPrefix} Destroying existing chart due to update error.`
+				);
 				chart.destroy();
 				chart = null;
 			}
 		}
 	}
 
-	// --- Highlight Update (Optimized) ---
 	function updateHighlightOnly() {
-		if (!chart || !chart.options || !currentProcessedData) {
+		console.log(
+			`${logPrefix} updateHighlightOnly called. Highlight: ${highlightedConstituency}`
+		);
+		if (
+			!chart ||
+			!chart.options ||
+			!currentProcessedData ||
+			!currentProcessedData.plotPoints ||
+			currentProcessedData.plotPoints.length === 0 ||
+			!Array.isArray(data)
+		) {
+			console.warn(
+				`${logPrefix} updateHighlightOnly prerequisites not met. Bailing out.`
+			);
 			return;
 		}
 		const dataset = chart.data.datasets[0];
-		if (!dataset) return;
+		if (!dataset) {
+			console.warn(
+				`${logPrefix} updateHighlightOnly: Dataset not found.`
+			);
+			return;
+		}
 		applyChartHighlight(
 			dataset,
 			currentProcessedData.plotPoints,
 			highlightedConstituency,
 			compact
 		);
-		chart.update("none"); // NO ANIMATION
+		chart.update("none");
+		console.log(`${logPrefix} Highlight update applied.`);
 	}
 
-	// --- Resize handler ---
 	const handleResize = debounce(() => {
-		if (
-			!isMounted ||
-			!chart ||
-			!chart.options ||
-			!chart.options.plugins?.tooltip ||
-			!chart.options.scales?.x?.ticks?.font ||
-			!chart.options.scales?.y?.ticks?.font ||
-			!chart.options.plugins?.title?.font ||
-			!chart.options.scales?.x?.title?.font ||
-			!chart.options.scales?.y?.title?.font ||
-			!chart.options.plugins?.tooltip?.titleFont ||
-			!chart.options.plugins?.tooltip?.bodyFont ||
-			!chartContainer
-		) {
-			return;
-		}
+		if (!isMounted || !chart || !chart.options || !chartContainer) return;
 		const newWidth = chartContainer.clientWidth;
-		if (newWidth <= 0) {
-			return;
-		}
+		if (newWidth <= 0) return;
 		const newFontSizes = getResponsiveFontSizes(newWidth);
 		let optionsChanged = false;
-		const updateFontSize = (
-			fontObject: Partial<FontSpec> | undefined,
-			newSize: number
-		): boolean => {
-			if (fontObject) {
-				if (
-					typeof fontObject.size !== "number" ||
-					fontObject.size !== newSize
-				) {
-					fontObject.size = newSize;
-					return true;
-				}
+		const updateFontSize = (fontObject: any, newSize: number): boolean => {
+			if (fontObject && fontObject.size !== newSize) {
+				fontObject.size = newSize;
+				return true;
 			}
 			return false;
 		};
-		optionsChanged =
-			updateFontSize(
-				chart.options.plugins.tooltip.titleFont,
-				newFontSizes.tooltipTitleSize
-			) || optionsChanged;
-		optionsChanged =
-			updateFontSize(
-				chart.options.plugins.tooltip.bodyFont,
-				newFontSizes.tooltipBodySize
-			) || optionsChanged;
-		optionsChanged =
-			updateFontSize(
-				chart.options.plugins.title.font,
-				newFontSizes.titleSize
-			) || optionsChanged;
-		optionsChanged =
-			updateFontSize(
-				chart.options.scales.x.title.font,
-				newFontSizes.axisTitleSize
-			) || optionsChanged;
-		optionsChanged =
-			updateFontSize(
-				chart.options.scales.y.title.font,
-				newFontSizes.axisTitleSize
-			) || optionsChanged;
-		optionsChanged =
-			updateFontSize(
-				chart.options.scales.x.ticks.font,
-				newFontSizes.tickSize
-			) || optionsChanged;
-		optionsChanged =
-			updateFontSize(
-				chart.options.scales.y.ticks.font,
-				newFontSizes.tickSize
-			) || optionsChanged;
+		if (chart.options?.plugins?.tooltip) {
+			optionsChanged =
+				updateFontSize(
+					chart.options.plugins.tooltip.titleFont,
+					newFontSizes.tooltipTitleSize
+				) || optionsChanged;
+			optionsChanged =
+				updateFontSize(
+					chart.options.plugins.tooltip.bodyFont,
+					newFontSizes.tooltipBodySize
+				) || optionsChanged;
+		}
+		if (chart.options?.plugins?.title?.font) {
+			optionsChanged =
+				updateFontSize(
+					chart.options.plugins.title.font,
+					newFontSizes.titleSize
+				) || optionsChanged;
+		}
+		if (chart.options?.scales?.x?.title?.font) {
+			optionsChanged =
+				updateFontSize(
+					chart.options.scales.x.title.font,
+					newFontSizes.axisTitleSize
+				) || optionsChanged;
+		}
+		if (chart.options?.scales?.y?.title?.font) {
+			optionsChanged =
+				updateFontSize(
+					chart.options.scales.y.title.font,
+					newFontSizes.axisTitleSize
+				) || optionsChanged;
+		}
+		if (chart.options?.scales?.x?.ticks?.font) {
+			optionsChanged =
+				updateFontSize(
+					chart.options.scales.x.ticks.font,
+					newFontSizes.tickSize
+				) || optionsChanged;
+		}
+		if (chart.options?.scales?.y?.ticks?.font) {
+			optionsChanged =
+				updateFontSize(
+					chart.options.scales.y.ticks.font,
+					newFontSizes.tickSize
+				) || optionsChanged;
+		}
 		if (optionsChanged) {
 			chart.update("none");
-		} // NO ANIMATION
+		}
 	}, 150);
 
 	// --- Lifecycle ---
 	onMount(async () => {
+		console.log(`${logPrefix} Component mounted.`);
+		if (!browser) return;
 		isMounted = true;
-		isLoading = true;
+		isLoading = true; // Start loading
 		errorMessage = null;
 		try {
+			console.log(`${logPrefix} Loading chart libraries...`);
 			const libs = await loadChartLibraries();
 			if (!libs) throw new Error("Chart libraries failed to load.");
 			ChartJS = libs.Chart;
 			ss = libs.ss;
-			// Wait briefly for container to potentially render before first update
-			await new Promise((resolve) => setTimeout(resolve, 10));
-			await updateChart(); // Initial render attempt
+			console.log(`${logPrefix} Chart libraries loaded.`);
+			console.log(`${logPrefix} Setting up ResizeObserver.`);
 			resizeObserver = new ResizeObserver(handleResize);
 			if (chartContainer) resizeObserver.observe(chartContainer);
 		} catch (err: any) {
-			console.error("Scatter: Initialization failed:", err);
+			console.error(`${logPrefix} Initialization failed:`, err);
 			errorMessage = `Initialization Error: ${err.message}.`;
-			isLoading = false; // Ensure loading stops on init error
+			isLoading = false;
 			isMounted = false;
 		}
 	});
 
 	onDestroy(() => {
+		console.log(`${logPrefix} Component destroying...`);
 		isMounted = false;
-		if (resizeObserver && chartContainer)
+		if (resizeObserver && chartContainer) {
+			console.log(`${logPrefix} Unobserving chart container.`);
 			resizeObserver.unobserve(chartContainer);
+		}
 		resizeObserver = null;
 		if (chart) {
+			console.log(`${logPrefix} Destroying chart instance.`);
 			chart.destroy();
 			chart = null;
 		}
 		currentProcessedData = null;
 		ChartJS = null;
 		ss = null;
-		console.log("Scatter: Destroyed.");
+		console.log(`${logPrefix} Cleanup complete.`);
 	});
 
 	// --- Reactive updates ---
-	const debouncedUpdateChart = debounce(updateChart, 200);
+	const debouncedUpdateChart = debounce(updateChart, 100);
+
 	$: if (isMounted && ChartJS && ss) {
-		if (
-			selectedParty !== prevSelectedParty ||
-			selectedMetric !== prevSelectedMetric ||
-			data?.length !== prevDataLength
-		) {
-			console.log(
-				"Scatter: Data/Metric/Party changed, triggering full update."
-			);
-			debouncedUpdateChart();
-			prevSelectedParty = selectedParty;
-			prevSelectedMetric = selectedMetric;
-			prevDataLength = data?.length ?? 0;
+		if (!Array.isArray(data)) {
+			console.warn(`${logPrefix} Reactive: data is not an array.`);
+			if (!isLoading && !errorMessage) {
+				errorMessage = "Chart Error: Waiting for valid data...";
+			}
+			if (chart) {
+				console.log(
+					`${logPrefix} Reactive: Destroying chart due to invalid data.`
+				);
+				chart.destroy();
+				chart = null;
+				currentProcessedData = null;
+			}
+			prevData = null;
+		} else {
+			if (errorMessage === "Chart Error: Waiting for valid data...") {
+				console.log(
+					`${logPrefix} Reactive: Valid data received, clearing 'waiting' error.`
+				);
+				errorMessage = null;
+			}
+			const isInitialLoad = prevData === null && data.length > 0;
+			const dataHasChanged = prevData !== data;
+			const partyChanged = selectedParty !== prevSelectedParty;
+			const metricChanged = selectedMetric !== prevSelectedMetric;
+			const highlightChanged = highlightedConstituency !== prevHighlight;
+
+			if (
+				isInitialLoad ||
+				partyChanged ||
+				metricChanged ||
+				dataHasChanged
+			) {
+				console.log(
+					`${logPrefix} Reactive: Triggering full update. Initial=${isInitialLoad}, Changes: data=${dataHasChanged}, party=${partyChanged}, metric=${metricChanged}`
+				);
+				if (!isLoading) isLoading = true;
+				debouncedUpdateChart(
+					isInitialLoad ? "initial load" : "props change"
+				);
+				prevSelectedParty = selectedParty;
+				prevSelectedMetric = selectedMetric;
+				prevData = data;
+			} else if (highlightChanged) {
+				console.log(
+					`${logPrefix} Reactive: Triggering highlight-only update.`
+				);
+				updateHighlightOnly();
+			}
 		}
-	}
-	$: if (isMounted && chart && highlightedConstituency !== prevHighlight) {
-		console.log("Scatter: Highlight changed, applying style update.");
-		updateHighlightOnly();
 		prevHighlight = highlightedConstituency;
 	}
 </script>
 
 <!-- HTML Template -->
-<div
-	class="font-sans bg-white rounded-lg border border-gray-200/75 shadow-sm {compact
-		? 'p-2'
-		: 'p-3 sm:p-4'}"
->
+<div class="rounded-lg border border-gray-200/80 bg-white p-3 shadow-sm sm:p-4">
 	<div
 		bind:this={chartContainer}
-		class="relative w-full mx-auto bg-gray-50/50 rounded-md border border-gray-200/80 overflow-hidden mb-3"
-		style:min-height={compact ? "280px" : "350px"}
-		style:aspect-ratio={compact ? "1 / 1" : "16 / 10"}
-		style:max-height={compact ? "350px" : "500px"}
+		class="relative mx-auto mb-3 h-full w-full overflow-hidden rounded-md border border-gray-200/60 bg-gray-50/50"
+		style:min-height={"400px"}
 	>
 		<canvas
 			bind:this={canvas}
-			class="absolute inset-0 w-full h-full {isLoading || errorMessage
+			class="absolute inset-0 block h-full w-full {isLoading ||
+			errorMessage
 				? 'opacity-0 pointer-events-none'
 				: 'opacity-100'} transition-opacity duration-200"
-			style="display: block;"
+			style="box-sizing: border-box;"
 		></canvas>
 		{#if isLoading || errorMessage}
 			<ChartPlaceholder
 				{isLoading}
 				{errorMessage}
-				initialLoad={!isMounted && isLoading}
+				initialLoad={!chart && isLoading}
 			/>
 		{/if}
 	</div>
 	<div
-		class="py-1.5 text-center min-h-[28px] bg-gray-100/70 rounded border border-gray-200/60 mb-3"
+		class="min-h-[28px] rounded border border-gray-200/60 bg-gray-100/70 py-1.5 text-center"
 	>
 		<ChartStatistics
 			pearsonR={currentProcessedData?.pearsonR ?? null}
@@ -387,5 +422,4 @@
 			{isLoading}
 		/>
 	</div>
-	<ChartNotes {compact} />
 </div>

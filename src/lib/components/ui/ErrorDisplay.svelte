@@ -5,32 +5,32 @@
 
 {#if error}
 	<div
-		class="bg-red-50 border border-red-300 text-red-800 px-4 py-3 rounded-lg max-w-3xl mx-auto text-sm flex items-start space-x-3 shadow-sm"
+		class="mx-auto flex max-w-3xl items-start space-x-3 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 shadow-sm"
 		role="alert"
 	>
 		<svg
-			class="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5"
+			class="mt-0.5 h-5 w-5 flex-shrink-0 text-red-500"
 			fill="currentColor"
 			viewBox="0 0 20 20"
 		>
 			<path
 				fill-rule="evenodd"
-				d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-10a1 1 0 10-2 0v4a1 1 0 102 0v-4zm-1-4a1 1 0 011 1v.01a1 1 0 11-2 0V5a1 1 0 011-1z"
+				d="M10 18a8 8 0 100-16 8 8 0 000 16zm-.75-4.75a.75.75 0 001.5 0v-6a.75.75 0 00-1.5 0v6zm.75-9a1 1 0 100 2 1 1 0 000-2z"
 				clip-rule="evenodd"
 			></path>
 		</svg>
 		<div>
 			<strong class="font-medium">Error Loading Data:</strong>
-			<span class="block mt-0.5">{error}</span>
+			<span class="mt-0.5 block">{error}</span>
 		</div>
 	</div>
 {:else if loading}
 	<div
-		class="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg max-w-3xl mx-auto text-sm flex items-center space-x-3 shadow-sm"
+		class="mx-auto flex max-w-3xl items-center space-x-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 shadow-sm"
 		role="status"
 	>
 		<svg
-			class="animate-spin h-5 w-5 text-blue-600 flex-shrink-0"
+			class="h-5 w-5 flex-shrink-0 animate-spin text-blue-600"
 			xmlns="http://www.w3.org/2000/svg"
 			fill="none"
 			viewBox="0 0 24 24"
