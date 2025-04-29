@@ -385,41 +385,82 @@ export const metrics: MetricOption[] = [
 		group: "Politics",
 	},
 	{
+		value: "Turnout19",
+		label: "Turnout 2019 (%)", // Corrected Label
+		group: "2019 Election",
+	},
+	{
 		value: "Con19",
 		label: "Conservative Voteshare 2019 (%)",
-		group: "Politics",
+		group: "2019 Election",
 	},
 	{
 		value: "Lab19",
 		label: "Labour Voteshare 2019 (%)",
-		group: "Politics",
+		group: "2019 Election",
 	},
 	{
 		value: "LD19",
 		label: "Lib Dem Voteshare 2019 (%)",
-		group: "Politics",
+		group: "2019 Election",
 	},
 	{
 		value: "Brexit19",
 		label: "Brexit Party Voteshare 2019 (%)",
-		group: "Politics",
+		group: "2019 Election",
 	},
 	{
 		value: "Green19",
 		label: "Green Voteshare 2019 (%)",
-		group: "Politics",
+		group: "2019 Election",
 	},
 	{
 		value: "Other19",
 		label: "Other Voteshare 2019 (%)",
-		group: "Politics",
+		group: "2019 Election",
+	},
+	{
+		value: "Turnout24",
+		label: "Turnout 2024 (%)", // Corrected Label
+		group: "2024 Election",
+	},
+	{
+		value: "Con24",
+		label: "Conservative Voteshare 2024 (%)",
+		group: "2024 Election",
+	},
+	{
+		value: "Lab24",
+		label: "Labour Voteshare 2024 (%)",
+		group: "2024 Election",
+	},
+	{
+		value: "LD24",
+		label: "Lib Dem Voteshare 2024 (%)",
+		group: "2024 Election",
+	},
+	{
+		// Assuming Brexit Party -> Reform UK for 2024
+		value: "Reform24",
+		label: "Reform UK Voteshare 2024 (%)",
+		group: "2024 Election",
+	},
+	{
+		value: "Green24",
+		label: "Green Voteshare 2024 (%)",
+		group: "2024 Election",
+	},
+	{
+		value: "Other24",
+		label: "Other Voteshare 2024 (%)",
+		group: "2024 Election",
 	},
 ];
 
 // --- Party/Voteshare Configuration ---
 export const partyGroups: PartyGroup[] = [
 	{
-		groupName: "Swing & Brexit",
+		groupName: "Misc",
 		options: [
 			{
 				value: "swing_con_lab_19_24",
@@ -429,18 +470,19 @@ export const partyGroups: PartyGroup[] = [
 		],
 	},
 	{
-		groupName: "2024 Voteshare",
+		groupName: "2024 Election",
 		options: [
-			{ value: "con_voteshare", label: "Conservative 2024 (%)" },
-			{ value: "lab_voteshare", label: "Labour 2024 (%)" },
-			{ value: "ld_voteshare", label: "Lib Dem 2024 (%)" },
-			{ value: "ref_voteshare", label: "Reform UK 2024 (%)" },
-			{ value: "green_voteshare", label: "Green 2024 (%)" },
-			{ value: "oth_voteshare", label: "Other 2024 (%)" },
+			{ value: "Con24", label: "Conservative 2024 (%)" },
+			{ value: "Lab24", label: "Labour 2024 (%)" },
+			{ value: "LD24", label: "Lib Dem 2024 (%)" },
+			{ value: "R24", label: "Reform UK 2024 (%)" },
+			{ value: "Green24", label: "Green 2024 (%)" },
+			{ value: "Other24", label: "Other 2024 (%)" },
+			{ value: "Turnout24", label: "Turnout 2024 (%)" },
 		],
 	},
 	{
-		groupName: "2019 Voteshare",
+		groupName: "2019 Election",
 		options: [
 			{ value: "Con19", label: "Conservative 2019 (%)" },
 			{ value: "Lab19", label: "Labour 2019 (%)" },
@@ -448,6 +490,7 @@ export const partyGroups: PartyGroup[] = [
 			{ value: "Brexit19", label: "Brexit Party 2019 (%)" },
 			{ value: "Green19", label: "Green 2019 (%)" },
 			{ value: "Other19", label: "Other 2019 (%)" },
+			{ value: "Turnout19", label: "Turnout 2019 (%)" },
 		],
 	},
 ];
@@ -468,16 +511,6 @@ export const partyQuintileColors = [
 	"#7b3294",
 ];
 export const NO_DATA_COLOR = "#e0e0e0"; // Light Gray
-
-// Specific party colors (not currently used for map/scatter points)
-export const partyColors: { [key: string]: string } = {
-	con_voteshare: "#00538C",
-	lab_voteshare: "#C7002F",
-	ld_voteshare: "#EAA000",
-	ref_voteshare: "#0A8AA0",
-	green_voteshare: "#528D1C",
-	oth_voteshare: "#52525B",
-};
 
 // --- Map Defaults ---
 export const UK_DEFAULT_CENTER: [number, number] = [-2, 54.5];

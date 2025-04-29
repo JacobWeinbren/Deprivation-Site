@@ -35,7 +35,7 @@
 
 	// --- Component State ---
 	let activeTab: "scatter" | "compare" = "scatter";
-	let selectedParty = "lab_voteshare";
+	let selectedParty = "Lab24";
 	let selectedMetric = "overall_local_score";
 	let searchTerm: string = "";
 	let highlightedConstituency: string | null = null;
