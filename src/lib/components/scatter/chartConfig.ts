@@ -81,7 +81,7 @@ export const metrics: MetricOption[] = [
 	// === Group: Economic - Importance #2 ===
 	{
 		value: "child_poverty_percentage_22_23",
-		label: "Child Poverty % (Relative)",
+		label: "Child Poverty (%)",
 		group: "Economic",
 	},
 	{

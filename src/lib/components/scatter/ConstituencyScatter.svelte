@@ -373,29 +373,39 @@
 			const chartTitleText =
 				title || `${selectedPartyLabel} vs ${selectedMetricLabel}`;
 
-			const formatXAxisTick = (value: any) => {
+			function formatXAxisTick(value: number | null): string {
+				if (value === null || value === undefined) return "N/A";
 				const numValue = Number(value);
-				if (isNaN(numValue)) return value;
+				if (isNaN(numValue)) return "N/A";
+				// Use the provided label for context
 				if (
-					selectedMetricLabel.includes("(£)") ||
-					selectedMetricLabel.toLowerCase().includes("price") ||
-					selectedMetricLabel.toLowerCase().includes("income")
+					currentMetric.includes("(%)") ||
+					currentMetric.includes("Voteshare")
 				) {
+					// Handle potential 0-1 range if label doesn't explicitly have % but implies it
+					if (
+						numValue >= 0 &&
+						numValue <= 1 &&
+						!currentMetric.includes("%")
+					) {
+						return `${(numValue * 100).toFixed(1)}%`;
+					}
+					return `${numValue.toFixed(1)}%`;
+				}
+				if (currentMetric.includes("(£)")) {
 					return numValue >= 1000
 						? `£${(numValue / 1000).toFixed(0)}k`
-						: `£${numValue.toLocaleString()}`;
+						: `£${numValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 				}
-				if (selectedMetricLabel.includes("(%)")) {
-					return `${numValue.toFixed(0)}%`;
-				}
+				if (Math.abs(numValue) < 1 && numValue !== 0)
+					return numValue.toFixed(2);
+				if (Math.abs(numValue) < 10) return numValue.toFixed(1);
 				if (Math.abs(numValue) >= 10000)
 					return (numValue / 1000).toFixed(0) + "k";
-				if (Math.abs(numValue) < 10 && numValue !== 0)
-					return numValue.toFixed(1);
 				return numValue.toLocaleString(undefined, {
 					maximumFractionDigits: 0,
 				});
-			};
+			}
 
 			const formatYAxisTick = (value: any) => {
 				const numValue = Number(value);
@@ -413,16 +423,28 @@
 					index < currentTooltipLabels.length
 				) {
 					const pointLabel = currentTooltipLabels[index];
-					const x = context.parsed.x.toLocaleString(undefined, {
-						maximumFractionDigits: 1,
-					});
-					const y = context.parsed.y.toLocaleString(undefined, {
-						maximumFractionDigits: 1,
-					});
+					let xFormatted;
+					// Special formatting for house price in tooltip
+					if (currentMetric === "median_house_price_2023") {
+						xFormatted = `£${context.parsed.x.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+					} else {
+						xFormatted = context.parsed.x.toLocaleString(
+							undefined,
+							{
+								maximumFractionDigits: 1,
+							}
+						);
+					}
+					const yFormatted = context.parsed.y.toLocaleString(
+						undefined,
+						{
+							maximumFractionDigits: 1,
+						}
+					);
 					return [
 						pointLabel,
-						`${selectedMetricLabel.split("(")[0].trim()}: ${x}`,
-						`${selectedPartyLabel.split("(")[0].trim()}: ${y}%`,
+						`${selectedMetricLabel.split("(")[0].trim()}: ${xFormatted}`,
+						`${selectedPartyLabel.split("(")[0].trim()}: ${yFormatted}%`,
 					];
 				}
 				// Return null for other datasets (like the trend line)
@@ -438,6 +460,8 @@
 				chart.options.scales.y.title.text = selectedPartyLabel;
 				chart.options.plugins.tooltip.callbacks.label =
 					tooltipLabelCallback;
+				// Update tick formatting
+				chart.options.scales.x.ticks.callback = formatXAxisTick;
 				// Update font sizes
 				chart.options.plugins.title.font.size = fontSizes.titleSize;
 				chart.options.scales.x.title.font.size =
