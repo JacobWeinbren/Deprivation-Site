@@ -1,6 +1,6 @@
-<!-- src/lib/components/ConstituencyCompareMap.svelte -->
 <script lang="ts">
 	import { onMount, onDestroy } from "svelte";
+	import { browser } from "$app/environment";
 	import type {
 		LngLatLike,
 		Expression,
@@ -11,19 +11,40 @@
 		ErrorEvent,
 		MapDataEvent,
 		MapMouseEvent,
-		Popup, // Import Popup
-		GeoJSONGeometry, // Import GeoJSONGeometry type
-		NavigationControl, // Import NavigationControl
+		Popup,
+		GeoJSONGeometry,
+		NavigationControl,
 	} from "maplibre-gl";
-
-	import { browser } from "$app/environment";
 
 	import {
 		type ConstituencyData,
 		type MetricOption,
 		type PartyOption,
-	} from "./chartConfig";
-	import { getNumericValue } from "./utils";
+	} from "$lib/components/scatter/chartConfig";
+	import { getNumericValue } from "$lib/components/scatter/utils";
+	import { formatLegendLabel } from "$lib/components/scatter/ChartUtils";
+
+	// Import sub-components
+	import MapTooltip from "./MapTooltip.svelte";
+	import MapLegend from "./MapLegend.svelte";
+	import MapErrorOverlay from "./MapErrorOverlay.svelte";
+
+	// Import constants
+	import {
+		SOURCE_ID_LEFT,
+		LAYER_ID_LEFT,
+		SOURCE_ID_RIGHT,
+		LAYER_ID_RIGHT,
+		SOURCE_LAYER,
+		FEATURE_ID_PROPERTY,
+		FEATURE_NAME_PROPERTY,
+		NO_DATA_COLOR,
+		metricQuintileColors,
+		partyQuintileColors,
+		UK_DEFAULT_CENTER,
+		UK_DEFAULT_ZOOM,
+		minimalStyle,
+	} from "./MapConstants";
 
 	import { createEventDispatcher } from "svelte";
 	const dispatch = createEventDispatcher<{
@@ -38,7 +59,6 @@
 	export let metrics: MetricOption[] = [];
 	export let parties: PartyOption[] = [];
 	export let partyColors: { [key: string]: string } = {};
-	export let mapboxAccessToken: string; // Keep prop name for compatibility if needed elsewhere
 	export let mapIdLeft: string =
 		"compare-map-left-" + Math.random().toString(36).substring(2, 9);
 	export let mapIdRight: string =
@@ -118,8 +138,6 @@
 					maxLng = Math.max(maxLng, lng);
 					minLat = Math.min(minLat, lat);
 					maxLat = Math.max(maxLat, lat);
-				} else {
-					// console.warn(`Invalid coordinate skipped: [${lng}, ${lat}]`);
 				}
 			});
 		};
@@ -136,7 +154,6 @@
 					}
 				});
 			} else {
-				// console.warn("Unsupported geometry type for bounds calculation:", geometry.type);
 				return null;
 			}
 		} catch (error) {
@@ -150,7 +167,6 @@
 			!isFinite(minLat) ||
 			!isFinite(maxLat)
 		) {
-			// console.warn("Could not determine finite bounds for geometry");
 			return null; // Invalid bounds
 		}
 
@@ -299,10 +315,10 @@
 
 		// Create popup content
 		customPopupContent = `
-      <div class="custom-map-tooltip">
-        <strong class="block text-xs font-medium mb-0.5">${name || "Unknown"}</strong>
-        <span class="block text-[11px] text-gray-600">${label.split("(")[0].trim()}: ${formattedValue}</span>
-      </div>`;
+        <div class="custom-map-tooltip">
+          <strong class="block text-xs font-medium mb-0.5">${name || "Unknown"}</strong>
+          <span class="block text-[11px] text-gray-600">${label.split("(")[0].trim()}: ${formattedValue}</span>
+        </div>`;
 
 		// Get container position once if not already done
 		if (!containerRect) {
@@ -337,73 +353,15 @@
 		}
 	}
 
-	// Shared constants
-	const SOURCE_ID_LEFT = "constituencies-source-left";
-	const LAYER_ID_LEFT = "constituency-fills-left";
-	const SOURCE_ID_RIGHT = "constituencies-source-right";
-	const LAYER_ID_RIGHT = "constituency-fills-right";
-	const SOURCE_LAYER = "uk-constituencies";
-	const FEATURE_ID_PROPERTY = "PCON24CD"; // ID property in vector tiles
-	const FEATURE_NAME_PROPERTY = "PCON24NM"; // Name property in vector tiles
-	const NO_DATA_COLOR = "#e0e0e0";
-
-	// --- Map Initialization Options ---
-	const minimalStyle: StyleSpecification = {
-		version: 8,
-		sources: {},
-		layers: [],
-	};
-	let mapOptions: Omit<MapOptions, "container">;
-
-	// --- Helper function to lighten colors ---
-	function lightenColor(hex: string, factor: number): string {
-		hex = hex.replace("#", "");
-		let r = parseInt(hex.substring(0, 2), 16);
-		let g = parseInt(hex.substring(2, 4), 16);
-		let b = parseInt(hex.substring(4, 6), 16);
-		r = Math.min(255, Math.round(r + (255 - r) * factor));
-		g = Math.min(255, Math.round(g + (255 - g) * factor));
-		b = Math.min(255, Math.round(b + (255 - b) * factor));
-		return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
-	}
-
-	// --- formatLegendLabel helper (MODIFIED) ---
-	function formatLegendLabel(value: number | null, label: string): string {
-		if (value === null || value === undefined) return "N/A";
-		const numValue = Number(value);
-		if (isNaN(numValue)) return "N/A";
-		// Use the provided label for context
-		if (label.includes("(%)") || label.includes("Voteshare")) {
-			// Handle potential 0-1 range if label doesn't explicitly have % but implies it
-			if (numValue >= 0 && numValue <= 1 && !label.includes("%")) {
-				return `${(numValue * 100).toFixed(1)}%`;
-			}
-			return `${numValue.toFixed(1)}%`;
-		}
-		if (label.includes("(£)")) {
-			return numValue >= 1000
-				? `£${(numValue / 1000).toFixed(0)}k`
-				: `£${numValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-		}
-		if (Math.abs(numValue) < 1 && numValue !== 0)
-			return numValue.toFixed(2);
-		if (Math.abs(numValue) < 10) return numValue.toFixed(1);
-		if (Math.abs(numValue) >= 10000)
-			return (numValue / 1000).toFixed(0) + "k";
-		return numValue.toLocaleString(undefined, { maximumFractionDigits: 0 });
-	}
-
 	// --- Add Source and Layer (Reduced Logging) ---
 	async function addSourceAndLayer(
 		mapInstance: MaplibreMap,
 		sourceId: string,
 		layerId: string
 	): Promise<void> {
-		// console.log(`Starting addSourceAndLayer for ${sourceId}/${layerId}`);
 		return new Promise((resolve, reject) => {
 			try {
 				if (!mapInstance.getSource(sourceId)) {
-					// console.log(`Adding vector tile source ${sourceId}`);
 					mapInstance.addSource(sourceId, {
 						type: "vector",
 						tiles: [
@@ -416,7 +374,6 @@
 
 					const checkSourceLoaded = (e: MapDataEvent) => {
 						if (e.sourceId === sourceId && e.isSourceLoaded) {
-							// console.log(`Source ${sourceId} loaded via event!`);
 							mapInstance.off("sourcedata", checkSourceLoaded);
 							addLayersAndResolve();
 						}
@@ -424,18 +381,15 @@
 					mapInstance.on("sourcedata", checkSourceLoaded);
 
 					if (mapInstance.isSourceLoaded(sourceId)) {
-						// console.log(`Source ${sourceId} was loaded immediately`);
 						mapInstance.off("sourcedata", checkSourceLoaded);
 						addLayersAndResolve();
 					}
 				} else {
-					// console.log(`Source ${sourceId} already exists, proceeding to layers`);
 					addLayersAndResolve();
 				}
 
 				function addLayersAndResolve() {
 					if (!mapInstance.getLayer(layerId)) {
-						// console.log(`Adding main fill layer ${layerId}`);
 						mapInstance.addLayer({
 							id: layerId,
 							type: "fill",
@@ -448,7 +402,6 @@
 							},
 						});
 
-						// console.log(`Adding outline layer ${layerId}-highlight-outline`);
 						mapInstance.addLayer({
 							id: `${layerId}-highlight-outline`,
 							type: "line",
@@ -461,36 +414,23 @@
 							},
 							filter: ["==", FEATURE_ID_PROPERTY, ""], // Initially filter out everything
 						});
-					} else {
-						// console.log(`Layer ${layerId} already exists`);
 					}
-					// console.log(`Resolving addSourceAndLayer for ${layerId}`);
 					resolve();
 				}
 
 				// Safety timeout
 				setTimeout(() => {
 					if (!mapInstance.getSource(sourceId)) {
-						console.error(
-							`Source ${sourceId} failed to load within timeout!`
-						);
 						reject(
 							new Error(
 								`Source ${sourceId} failed to load within timeout`
 							)
 						);
 					} else if (!mapInstance.getLayer(layerId)) {
-						console.warn(
-							`Adding layers for ${layerId} via timeout fallback`
-						);
 						addLayersAndResolve(); // Attempt to add layers anyway
 					}
 				}, 5000); // Slightly longer timeout
 			} catch (error) {
-				console.error(
-					`Critical error in addSourceAndLayer for ${layerId}:`,
-					error
-				);
 				reject(error);
 			}
 		});
@@ -503,17 +443,13 @@
 		variableKey: string,
 		variableType: "party" | "metric"
 	): boolean {
-		// console.log(`updateFeatureStates for ${sourceId}, key: ${variableKey}, type: ${variableType}`);
 		if (!mapInstance || !mapInstance.isStyleLoaded()) {
-			// console.warn(`updateFeatureStates: map or style not ready for ${sourceId}`);
 			return false;
 		}
 		if (!mapInstance.getSource(sourceId)) {
-			// console.warn(`updateFeatureStates: source ${sourceId} not found`);
 			return false;
 		}
 		if (!data || data.length === 0 || !variableKey) {
-			// console.warn(`updateFeatureStates: no data or variableKey`);
 			return false;
 		}
 
@@ -576,10 +512,9 @@
 					featuresMissing++;
 				}
 			} catch (e) {
-				// console.warn(`Error setting feature state for ${code}: ${e.message}`);
+				// Silently handle errors
 			}
 		});
-		// console.log(`Feature states updated: ${featuresUpdated}, missing: ${featuresMissing}`);
 		return featuresUpdated > 0;
 	}
 
@@ -590,13 +525,11 @@
 		variableType: "party" | "metric",
 		variableKey: string
 	) {
-		// console.log(`updatePaintExpression for ${layerId}, key: ${variableKey}, type: ${variableType}`);
 		if (
 			!mapInstance ||
 			!mapInstance.isStyleLoaded() ||
 			!mapInstance.getLayer(layerId)
 		) {
-			// console.warn(`updatePaintExpression: conditions not met for ${layerId}`);
 			return;
 		}
 
@@ -620,30 +553,13 @@
 			}
 		});
 
-		const baseColor =
-			variableType === "party"
-				? partyColors[variableKey] || "#C7002F" // Default party color (e.g., Labour Red)
-				: "#377EB8"; // Default metric base color (Blue - though less relevant now)
-
 		let colorSteps: string[];
 		if (variableType === "party") {
 			// Party map: Green to Purple diverging scheme
-			colorSteps = [
-				"#1b9e77", // Teal green (Low values)
-				"#66c2a5", // Light green
-				"#f7f7f7", // Off-White (Mid values)
-				"#d1b3d9", // Light purple
-				"#7b3294", // Deep purple (High values)
-			];
+			colorSteps = partyQuintileColors;
 		} else {
-			// Metric map: Orange to Blue diverging scheme
-			colorSteps = [
-				"#d73027", // Red-orange (Low values)
-				"#fc8d59", // Light orange
-				"#f7f7f7", // Off-White (Mid values)
-				"#91bfdb", // Light blue
-				"#2166ac", // Deep blue (High values)
-			];
+			// Metric map: Red to Blue diverging scheme
+			colorSteps = metricQuintileColors;
 		}
 
 		let quintiles: number[] = [];
@@ -668,10 +584,7 @@
 				// Less than 5 points, use simple interpolation (might look odd with diverging)
 				if (values[values.length - 1] <= values[0]) {
 					// All values are the same, use the middle color (or no data)
-					color =
-						variableType === "metric"
-							? colorSteps[2]
-							: lightenColor(baseColor, 0.8);
+					color = colorSteps[2]; // Middle color
 				} else {
 					const min = values[0];
 					const max = values[values.length - 1];
@@ -702,7 +615,6 @@
 				"fill-color",
 				matchExpression
 			);
-			// console.log(`Paint properties updated successfully for ${layerId}`);
 		} catch (error: any) {
 			console.error(`Error setting paint for ${layerId}:`, error);
 			errorMessage = `Map paint error for ${layerId}: ${error.message}`;
@@ -753,19 +665,16 @@
 				);
 			}
 		} catch (e: any) {
-			// console.warn(`Error setting highlight filter: ${e.message}`);
+			// Silent error handling
 		}
 	}
 
 	// --- Main Update Function (Reduced Logging) ---
 	function updateCompareMaps(forceUpdate = false) {
-		// console.log(`updateCompareMaps ENTRY - force=${forceUpdate}`);
 		if (!mapsInitialized || !sourcesAndLayersAdded || !isMapReadyForData) {
-			// console.warn(`Exiting updateCompareMaps early - conditions not met`);
 			return;
 		}
 		if (!mapLeft || !mapRight) {
-			// console.warn(`Maps not available: left=${!!mapLeft}, right=${!!mapRight}`);
 			return;
 		}
 
@@ -802,12 +711,6 @@
 				selectedMetric
 			);
 		}
-
-		// Force map redraw if needed (less critical now with match expression)
-		// mapLeft?.triggerRepaint();
-		// mapRight?.triggerRepaint();
-
-		// console.log(`updateCompareMaps EXIT`);
 	}
 
 	// --- Lifecycle: onMount ---
@@ -839,10 +742,10 @@
 				throw new Error("Failed to load MapLibre libraries");
 			}
 
-			mapOptions = {
+			const mapOptions: Omit<MapOptions, "container"> = {
 				style: minimalStyle,
-				center: [-2, 54.5],
-				zoom: 5,
+				center: UK_DEFAULT_CENTER as LngLatLike,
+				zoom: UK_DEFAULT_ZOOM,
 				minZoom: 4,
 				maxZoom: 14, // Increased max zoom slightly
 				pitch: 0,
@@ -887,6 +790,24 @@
 			mapLeft.addControl(navControlLeft, "top-right");
 			mapRight.addControl(navControlRight, "top-right");
 
+			// Add interaction handlers
+			mapLeft.on("click", LAYER_ID_LEFT, handleConstituencyClick);
+			mapRight.on("click", LAYER_ID_RIGHT, handleConstituencyClick);
+
+			mapLeft.on("mousemove", LAYER_ID_LEFT, (e) =>
+				handleMouseMove(mapLeft, e, true)
+			);
+			mapRight.on("mousemove", LAYER_ID_RIGHT, (e) =>
+				handleMouseMove(mapRight, e, false)
+			);
+
+			mapLeft.on("mouseleave", LAYER_ID_LEFT, () =>
+				handleMouseLeave(mapLeft, true)
+			);
+			mapRight.on("mouseleave", LAYER_ID_RIGHT, () =>
+				handleMouseLeave(mapRight, false)
+			);
+
 			// Wait for maps to load initial style
 			await Promise.all([
 				new Promise<void>((resolve) => mapLeft!.once("load", resolve)),
@@ -926,18 +847,23 @@
 				// --- MODIFICATION START ---
 				// Center slider ONLY on the very first initialization
 				if (!compareControlInitialized) {
+					// Use requestAnimationFrame to wait for the next paint cycle
 					requestAnimationFrame(() => {
+						// Use a short timeout to ensure the control is fully ready
 						setTimeout(() => {
-							// Dispatch resize event to trigger centering calculation
-							window.dispatchEvent(new Event("resize"));
-							console.log(
-								"Dispatched resize event for initial compare control centering."
-							);
-							compareControlInitialized = true; // Set flag so it doesn't run again
-						}, 50); // Small delay
+							if (compareControl) {
+								// Check if control still exists
+								// Dispatch resize event to trigger centering calculation
+								window.dispatchEvent(new Event("resize"));
+								console.log(
+									"Dispatched resize event for initial compare control centering."
+								);
+								// Set the flag *after* the resize logic has been triggered
+								compareControlInitialized = true;
+							}
+						}, 100); // Slightly increased delay to 100ms
 					});
 				}
-				// --- MODIFICATION END ---
 			} else {
 				throw new Error("Maps became unavailable before compare init");
 			}
@@ -945,9 +871,6 @@
 			// Fade in maps
 			mapLeftContainer.style.opacity = "1";
 			mapRightContainer.style.opacity = "1";
-
-			// --- Event Handlers ---
-			// ... (keep event handlers: click, mousemove, mouseleave) ...
 
 			// --- Final Setup ---
 			isMapReadyForData = true;
@@ -1007,7 +930,6 @@
 				selectedMetric !== prevSelectedMetric ||
 				highlightedConstituency !== prevHighlight)
 		) {
-			// console.log("Reactive update triggered");
 			updateCompareMaps();
 			prevDataLength = data?.length ?? 0;
 			prevSelectedParty = selectedParty;
@@ -1016,23 +938,21 @@
 		}
 	}
 
-	// Define fixed quintile colors for the RIGHT (Metric) legend
-	// --- MODIFIED: Use Red-White-Blue colors ---
-	const metricQuintileColors = [
-		"#d73027", // Red-orange (Low)
-		"#fc8d59", // Light orange
-		"#f7f7f7", // Off-White (Mid)
-		"#91bfdb", // Light blue
-		"#2166ac", // Deep blue (High)
-	];
+	// Listen for retry events
+	function handleRetry() {
+		if (mapLeft && mapRight) {
+			errorMessage = null;
+			isLoading = true; // Show loading briefly
+			// Attempt a more forceful reset
+			setTimeout(() => updateCompareMaps(true), 50);
+			isLoading = false;
+		}
+	}
 
-	const partyQuintileColors = [
-		"#1b9e77", // Teal green (Low)
-		"#66c2a5", // Light green
-		"#f7f7f7", // Off-White (Mid)
-		"#d1b3d9", // Light purple
-		"#7b3294", // Deep purple (High)
-	];
+	// Set up listener when component is mounted
+	$: if (browser) {
+		window.addEventListener("retry", handleRetry);
+	}
 </script>
 
 <!-- HTML Template -->
@@ -1040,77 +960,17 @@
 	class="relative font-sans border border-gray-200/75 rounded-lg bg-white overflow-hidden shadow-sm"
 >
 	<!-- Error/Loading Overlays -->
-	{#if errorMessage}
-		<div
-			class="absolute inset-0 flex items-center justify-center bg-red-50 text-red-700 p-6 z-30 rounded-lg text-center"
-		>
-			<div class="flex flex-col items-center">
-				<svg
-					class="w-8 h-8 mb-2 text-red-400"
-					fill="none"
-					stroke="currentColor"
-					viewBox="0 0 24 24"
-					><path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-					></path></svg
-				>
-				<span class="font-medium text-sm">Map Error</span>
-				<p class="text-xs mt-1">{errorMessage}</p>
-				<button
-					class="mt-3 px-3 py-1 bg-red-100 hover:bg-red-200 text-red-800 text-xs rounded-md"
-					on:click={() => {
-						if (mapLeft && mapRight) {
-							errorMessage = null;
-							isLoading = true; // Show loading briefly
-							// Attempt a more forceful reset if needed
-							setTimeout(() => updateCompareMaps(true), 50);
-						}
-					}}
-				>
-					Retry
-				</button>
-			</div>
-		</div>
-	{/if}
-	{#if isLoading && !errorMessage}
-		<div
-			class="absolute inset-0 flex items-center justify-center bg-gray-50/80 text-gray-500 p-6 z-30 rounded-lg"
-		>
-			<div class="flex flex-col items-center justify-center text-center">
-				<svg
-					class="animate-spin h-6 w-6 text-blue-600 mb-2"
-					xmlns="http://www.w3.org/2000/svg"
-					fill="none"
-					viewBox="0 0 24 24"
-					><circle
-						class="opacity-25"
-						cx="12"
-						cy="12"
-						r="10"
-						stroke="currentColor"
-						stroke-width="4"
-					></circle><path
-						class="opacity-75"
-						fill="currentColor"
-						d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-					></path></svg
-				>
-				<p class="text-xs font-medium">Loading map...</p>
-			</div>
-		</div>
-	{/if}
+	<MapErrorOverlay {errorMessage} {isLoading} />
+	<!-- Removed on:retry here, handled globally -->
 
 	<!-- Container for the Compare Control -->
 	<div
 		bind:this={compareContainerElement}
 		id="compare-container"
-		class="relative w-full h-[450px] sm:h-[500px] rounded-t-lg overflow-hidden bg-gray-100 {isLoading ||
+		class="relative w-full h-[450px] sm:h-[500px] md:h-[550px] rounded-t-lg overflow-hidden bg-gray-100 {isLoading ||
 		errorMessage
 			? 'opacity-50 blur-[2px] pointer-events-none'
-			: ''}"
+			: ''} transition-all duration-200"
 	>
 		<!-- Start with opacity 0, fade in via onMount -->
 		<div
@@ -1125,115 +985,29 @@
 		></div>
 
 		<!-- Custom popup that floats above both maps -->
-		{#if customPopupVisible}
-			<div
-				class="custom-popup absolute pointer-events-none z-[1000]"
-				style="left: {customPopupPosition.x}px; top: {customPopupPosition.y}px;"
-			>
-				<div class="custom-popup-content">
-					{@html customPopupContent}
-				</div>
-			</div>
-		{/if}
+		<MapTooltip
+			visible={customPopupVisible}
+			content={customPopupContent}
+			position={customPopupPosition}
+		/>
 	</div>
 
 	<!-- Combined Legend -->
-	{#if !isLoading && !errorMessage}
-		<div
-			class="bg-white p-2.5 rounded-b-lg border-t border-gray-200/75 grid grid-cols-1 sm:grid-cols-2 gap-3 items-start"
-		>
-			<!-- Left Legend (Party) -->
-			<div class="text-center sm:text-left">
-				<div
-					class="text-xs font-medium text-gray-700 mb-1 truncate"
-					title={leftLabel || "Party Data"}
-				>
-					<span class="mr-1 text-gray-400">◀</span>
-					{leftLabel || "Party Data"}
-				</div>
-				{#if leftMinValue !== null && leftMaxValue !== null}
-					<div
-						class="flex items-center justify-center sm:justify-start space-x-1"
-					>
-						<span class="text-[10px] text-gray-500 w-9 text-right"
-							>{formatLegendLabel(leftMinValue, leftLabel)}</span
-						>
-						<div
-							class="flex h-3 flex-grow max-w-[120px] rounded-sm overflow-hidden border border-gray-200"
-						>
-							{#each partyQuintileColors as color, i (i)}
-								<div
-									class="flex-1"
-									style:background-color={color}
-									title={`Quintile ${i + 1}`}
-								></div>
-							{/each}
-						</div>
-						<span class="text-[10px] text-gray-500 w-9 text-left"
-							>{formatLegendLabel(leftMaxValue, leftLabel)}</span
-						>
-					</div>
-				{/if}
-			</div>
-			<!-- Right Legend (Metric) -->
-			<div class="text-center sm:text-right">
-				<div
-					class="text-xs font-medium text-gray-700 mb-1 truncate"
-					title={rightLabel || "Metric Data"}
-				>
-					{rightLabel || "Metric Data"}
-					<span class="ml-1 text-gray-400">▶</span>
-				</div>
-				{#if rightMinValue !== null && rightMaxValue !== null}
-					<div
-						class="flex items-center justify-center sm:justify-end space-x-1"
-					>
-						<!-- MODIFIED: Pass rightLabel to formatter -->
-						<span class="text-[10px] text-gray-500 w-9 text-right"
-							>{formatLegendLabel(
-								rightMinValue,
-								rightLabel
-							)}</span
-						>
-						<div
-							class="flex h-3 flex-grow max-w-[120px] rounded-sm overflow-hidden border border-gray-200"
-						>
-							<!-- MODIFIED: Use metricQuintileColors defined in script -->
-							{#each metricQuintileColors as color, i (i)}
-								<div
-									class="flex-1"
-									style:background-color={color}
-									title={`Quintile ${i + 1}`}
-								></div>
-							{/each}
-						</div>
-						<!-- MODIFIED: Pass rightLabel to formatter -->
-						<span class="text-[10px] text-gray-500 w-9 text-left"
-							>{formatLegendLabel(
-								rightMaxValue,
-								rightLabel
-							)}</span
-						>
-					</div>
-				{:else}
-					<div
-						class="text-[10px] text-gray-400 italic text-center sm:text-right"
-					>
-						(No data range)
-					</div>
-				{/if}
-			</div>
-			<div
-				class="col-span-1 sm:col-span-2 text-center text-[10px] text-gray-400 mt-1"
-			>
-				Colors show quintiles (approx. 20% bands based on available
-				data). Grey indicates no data or zero. Hover for details.
-			</div>
-		</div>
-	{/if}
+	<MapLegend
+		{leftLabel}
+		{leftMinValue}
+		{leftMaxValue}
+		{rightLabel}
+		{rightMinValue}
+		{rightMaxValue}
+		partyColors={partyQuintileColors}
+		metricColors={metricQuintileColors}
+		{isLoading}
+		{errorMessage}
+	/>
 </div>
 
-<!-- Global Styles for Compare Control, Tooltip & Navigation -->
+<!-- Global Styles for Compare Control & Navigation -->
 <style>
 	#compare-container {
 		position: relative;
@@ -1249,37 +1023,47 @@
 
 	/* Style the main swiper line */
 	:global(#compare-container .maplibregl-compare) {
-		background-color: rgba(107, 114, 128, 0.5); /* gray-500 with opacity */
+		background-color: rgba(55, 65, 81, 0.4); /* gray-700 with opacity */
 		box-shadow: none;
 		border: none;
-		width: 2px !important; /* Override default */
-		height: 100% !important; /* Override default */
+		width: 3px !important; /* Slightly thicker */
+		height: 100% !important;
 		z-index: 10;
 	}
 
-	/* Style the handle using the user's preferred style */
+	/* Style the handle */
 	:global(#compare-container .maplibregl-compare .compare-swiper-vertical),
 	:global(#compare-container .maplibregl-compare .compare-swiper-horizontal) {
-		width: 36px !important; /* Override default */
-		height: 36px !important; /* Override default */
-		background-color: rgba(
-			255,
-			255,
-			255,
-			0.85
-		) !important; /* Override default blue */
-		background-image: none !important; /* Remove default SVG arrows */
-		border-radius: 50% !important; /* Override default */
+		width: 40px !important; /* Slightly larger */
+		height: 40px !important;
+		background-color: rgba(255, 255, 255, 0.9) !important;
+		background-image: none !important;
+		border-radius: 50% !important;
 		box-shadow:
-			0 0 0 1px rgba(0, 0, 0, 0.05),
-			0 1px 3px rgba(0, 0, 0, 0.1) !important; /* Override default */
+			0 1px 3px rgba(0, 0, 0, 0.15),
+			0 0 0 1px rgba(0, 0, 0, 0.05) !important;
 		border: 1px solid rgba(0, 0, 0, 0.1);
-		cursor: ew-resize; /* Keep ew-resize for vertical swiper */
-		/* Center the handle on the line */
+		cursor: ew-resize;
 		top: 50%;
-		left: 50%; /* Centered horizontally within the line */
-		transform: translate(-50%, -50%); /* Precise centering */
-		margin: 0 !important; /* Reset margins */
+		left: 50%;
+		transform: translate(-50%, -50%);
+		margin: 0 !important;
+		transition: background-color 0.15s ease-in-out;
+	}
+	:global(
+			#compare-container
+				.maplibregl-compare
+				.compare-swiper-vertical:hover
+		),
+	:global(
+			#compare-container
+				.maplibregl-compare
+				.compare-swiper-horizontal:hover
+		) {
+		background-color: rgba(255, 255, 255, 1) !important;
+		box-shadow:
+			0 2px 5px rgba(0, 0, 0, 0.2),
+			0 0 0 1px rgba(0, 0, 0, 0.07) !important;
 	}
 
 	/* Adjust cursor for horizontal swiper handle */
@@ -1304,7 +1088,8 @@
 		height: 0;
 		border-style: solid;
 		top: 50%;
-		transform: translateY(-50%); /* Center vertically */
+		transform: translateY(-50%);
+		transition: border-color 0.15s ease-in-out;
 	}
 	:global(
 			#compare-container
@@ -1312,9 +1097,9 @@
 				.compare-swiper-vertical::before
 		) {
 		/* Left arrow */
-		border-width: 4px 5px 4px 0;
-		border-color: transparent #6b7280 transparent transparent; /* gray-500 */
-		left: 7px;
+		border-width: 5px 6px 5px 0; /* Slightly larger */
+		border-color: transparent #4b5563 transparent transparent; /* gray-600 */
+		left: 8px;
 	}
 	:global(
 			#compare-container
@@ -1322,9 +1107,23 @@
 				.compare-swiper-vertical::after
 		) {
 		/* Right arrow */
-		border-width: 4px 0 4px 5px;
-		border-color: transparent transparent transparent #6b7280; /* gray-500 */
-		right: 7px;
+		border-width: 5px 0 5px 6px;
+		border-color: transparent transparent transparent #4b5563; /* gray-600 */
+		right: 8px;
+	}
+	:global(
+			#compare-container
+				.maplibregl-compare
+				.compare-swiper-vertical:hover::before
+		) {
+		border-color: transparent #1f2937 transparent transparent; /* gray-800 */
+	}
+	:global(
+			#compare-container
+				.maplibregl-compare
+				.compare-swiper-vertical:hover::after
+		) {
+		border-color: transparent transparent transparent #1f2937; /* gray-800 */
 	}
 
 	/* Add custom arrows for horizontal swiper */
@@ -1344,7 +1143,8 @@
 		height: 0;
 		border-style: solid;
 		left: 50%;
-		transform: translateX(-50%); /* Center horizontally */
+		transform: translateX(-50%);
+		transition: border-color 0.15s ease-in-out;
 	}
 	:global(
 			#compare-container
@@ -1352,9 +1152,9 @@
 				.compare-swiper-horizontal::before
 		) {
 		/* Top arrow */
-		border-width: 0 4px 5px 4px; /* left/right bottom left/right */
-		border-color: transparent transparent #6b7280 transparent; /* gray-500 */
-		top: 7px;
+		border-width: 0 5px 6px 5px; /* left/right bottom left/right */
+		border-color: transparent transparent #4b5563 transparent; /* gray-600 */
+		top: 8px;
 	}
 	:global(
 			#compare-container
@@ -1362,68 +1162,40 @@
 				.compare-swiper-horizontal::after
 		) {
 		/* Bottom arrow */
-		border-width: 5px 4px 0 4px;
-		border-color: #6b7280 transparent transparent transparent; /* gray-500 */
-		bottom: 7px;
+		border-width: 6px 5px 0 5px;
+		border-color: #4b5563 transparent transparent transparent; /* gray-600 */
+		bottom: 8px;
+	}
+	:global(
+			#compare-container
+				.maplibregl-compare
+				.compare-swiper-horizontal:hover::before
+		) {
+		border-color: transparent transparent #1f2937 transparent; /* gray-800 */
+	}
+	:global(
+			#compare-container
+				.maplibregl-compare
+				.compare-swiper-horizontal:hover::after
+		) {
+		border-color: #1f2937 transparent transparent transparent; /* gray-800 */
 	}
 
-	/* NEW CUSTOM POPUP STYLES */
-	.custom-popup {
-		transform: translate(-50%, -100%);
-		margin-top: -5px; /* Small offset from pointer */
-		animation: fadeIn 150ms ease-out forwards;
-	}
-
-	@keyframes fadeIn {
-		from {
-			opacity: 0;
-			transform: translate(-50%, -90%);
-		}
-		to {
-			opacity: 1;
-			transform: translate(-50%, -100%);
-		}
-	}
-
-	.custom-popup-content {
-		background-color: white;
-		color: #333;
-		border-radius: 4px;
-		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-		padding: 8px 10px;
-		font-size: 12px;
-		max-width: 240px;
-		border: 1px solid rgba(0, 0, 0, 0.1);
-		position: relative;
-	}
-
-	/* Optional: Add a small arrow/tip at the bottom */
-	.custom-popup-content::after {
-		content: "";
-		position: absolute;
-		bottom: -5px;
-		left: 50%;
-		transform: translateX(-50%);
-		width: 0;
-		height: 0;
-		border-left: 5px solid transparent;
-		border-right: 5px solid transparent;
-		border-top: 5px solid white;
-		filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.1));
-	}
-
+	/* Style for the title in popup */
 	/* Style for the title in popup */
 	:global(.custom-map-tooltip strong) {
 		display: block;
 		font-weight: 600;
 		margin-bottom: 2px;
 		font-size: 12px;
+		color: #fff; /* Keep title white */
 	}
 
-	/* Style for the value in popup */
+	/* Style for the value in popup - ADJUSTED COLOR */
 	:global(.custom-map-tooltip span) {
 		display: block;
-		color: #666;
+		/* Use a lighter gray for better contrast on the dark background */
+		color: #d1d5db; /* Tailwind's gray-300 */
 		font-size: 11px;
 	}
 
@@ -1432,6 +1204,9 @@
 	}
 
 	/* Fade in maps */
+	.relative {
+		position: relative;
+	}
 	.opacity-0 {
 		opacity: 0;
 	}
@@ -1445,37 +1220,32 @@
 		transition-timing-function: ease-in-out;
 	}
 
-	/* Navigation Control Styling - Mapbox GL JS v2/v3 Style */
+	/* Navigation Control Styling */
 	:global(.maplibregl-ctrl-top-right) {
 		margin: 10px 10px 0 0;
 		z-index: 5;
 	}
 	:global(.maplibregl-ctrl-group) {
-		/* Use Mapbox default background */
 		background: #fff !important;
 		border-radius: 4px !important;
-		/* Mapbox default shadow */
 		box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1) !important;
 		border: none !important;
 		overflow: hidden;
 	}
 	:global(.maplibregl-ctrl-group button) {
-		/* Mapbox default size */
-		width: 29px !important;
-		height: 29px !important;
+		width: 30px !important;
+		height: 30px !important;
 		background-color: transparent !important;
 		display: flex !important;
 		align-items: center !important;
 		justify-content: center !important;
-		/* Mapbox default icon color */
 		color: #333 !important;
 		opacity: 1;
 		cursor: pointer;
 		transition: background-color 0.1s ease-in-out;
 	}
 	:global(.maplibregl-ctrl-group button:hover) {
-		/* Mapbox default hover background */
-		background-color: #f0f0f0 !important; /* Slightly off-white/grey */
+		background-color: #f0f0f0 !important;
 		color: #000 !important;
 	}
 	:global(.maplibregl-ctrl-group button:focus) {
@@ -1484,41 +1254,26 @@
 	}
 	:global(.maplibregl-ctrl-group button:disabled) {
 		cursor: not-allowed;
-		color: #aaa !important; /* Lighter grey for disabled */
+		color: #aaa !important;
 		background-color: transparent !important;
 	}
 	:global(.maplibregl-ctrl-group button + button) {
-		/* Mapbox default separator */
 		border-top: 1px solid rgba(0, 0, 0, 0.1) !important;
 	}
-
-	/* Remove default icon background and set size */
 	:global(.maplibregl-ctrl-icon) {
 		background-image: none !important;
-		width: 18px; /* Standard size for Mapbox icons */
+		width: 18px;
 		height: 18px;
 		background-repeat: no-repeat;
 		background-position: center;
-		background-size: contain; /* Use contain for SVGs */
+		background-size: contain;
 	}
-
-	/* Mapbox Style SVG Icons (using data URIs) */
 	:global(.maplibregl-ctrl-zoom-in .maplibregl-ctrl-icon) {
-		/* Simple bold plus */
 		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath fill='%23333' d='M9,4.5a.75.75,0,0,1,.75.75v3h3a.75.75,0,0,1,0,1.5h-3v3a.75.75,0,0,1-1.5,0v-3h-3a.75.75,0,0,1,0-1.5h3v-3A.75.75,0,0,1,9,4.5z'/%3E%3C/svg%3E") !important;
 	}
 	:global(.maplibregl-ctrl-zoom-out .maplibregl-ctrl-icon) {
-		/* Simple bold minus */
 		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath fill='%23333' d='M4.5,8.25a.75.75,0,0,1,.75-.75h7.5a.75.75,0,0,1,0,1.5h-7.5A.75.75,0,0,1,4.5,8.25z'/%3E%3C/svg%3E") !important;
 	}
-	/* Hover state icon color change (optional but nice) */
-	:global(.maplibregl-ctrl-group button:hover .maplibregl-ctrl-icon) {
-		/* You might need to adjust the SVG fill color directly if using complex SVGs,
-		   but for these simple ones, the button's color change might suffice.
-		   If not, you'd need separate SVGs for hover or use mask-image with background-color. */
-	}
-
-	/* ... (keep existing styles for hiding controls on left map etc.) */
 	:global(
 			#compare-container
 				.maplibregl-compare-left

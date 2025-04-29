@@ -1,43 +1,47 @@
-// src/lib/components/scatter/utils.ts
-import type { ConstituencyData } from "./chartConfig";
-
 /**
- * Safely extracts a numeric value from a data row object.
- * @param row The data object.
- * @param key The key to extract the value from.
- * @returns The numeric value or null if invalid/missing.
+ * Retrieves a numeric value from a data object safely
  */
-export function getNumericValue(
-	row: ConstituencyData | null | undefined,
-	key: string
-): number | null {
-	const value = row ? row[key] : null;
-	if (value === null || value === undefined || value === "") return null;
-	const num = Number(value);
-	return Number.isFinite(num) ? num : null;
+export function getNumericValue(data: any, key: string): number | null {
+	if (!data || !key) return null;
+
+	// Handle non-existent property
+	if (!(key in data)) return null;
+
+	const val = data[key];
+
+	// Handle null/undefined
+	if (val === null || val === undefined) return null;
+
+	// Handle already numeric values
+	if (typeof val === "number") return isNaN(val) ? null : val;
+
+	// Handle string values by converting to number
+	if (typeof val === "string") {
+		const parsed = parseFloat(val);
+		return isNaN(parsed) ? null : parsed;
+	}
+
+	return null;
 }
 
 /**
- * Creates a debounced version of a function that delays invoking the function
- * until after `wait` milliseconds have elapsed since the last time the
- * debounced function was invoked.
- * @param func The function to debounce.
- * @param wait The number of milliseconds to delay.
- * @returns The debounced function.
+ * Creates a debounced function that delays invoking func until after wait milliseconds
  */
 export function debounce<T extends (...args: any[]) => any>(
 	func: T,
-	wait: number
+	wait: number = 300
 ): (...args: Parameters<T>) => void {
-	let timeout: number | undefined;
+	let timeout: ReturnType<typeof setTimeout> | null = null;
 
-	return function executedFunction(...args: Parameters<T>) {
+	return function (...args: Parameters<T>): void {
 		const later = () => {
-			clearTimeout(timeout);
+			timeout = null;
 			func(...args);
 		};
 
-		clearTimeout(timeout);
-		timeout = window.setTimeout(later, wait);
+		if (timeout !== null) {
+			clearTimeout(timeout);
+		}
+		timeout = setTimeout(later, wait);
 	};
 }
