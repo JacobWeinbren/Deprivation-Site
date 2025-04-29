@@ -653,7 +653,7 @@
 				center: [-2, 54.5],
 				zoom: 5,
 				minZoom: 4,
-				maxZoom: 14,
+				maxZoom: 10,
 				pitch: 0,
 				bearing: 0,
 				pitchWithRotate: false,
