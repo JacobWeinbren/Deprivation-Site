@@ -1,6 +1,6 @@
 <script lang="ts">
 	export let credits =
-		"Data: HoC Library, ONS, HESA, ECPC, gov.scot. Map: MapLibre, OpenStreetMap.";
+		"Data: Ralph Scott, HoC Library, ONS, HESA, ECPC, gov.scot. Map: MapLibre, OpenStreetMap.";
 	export let developer = "Developed by Jacob Weinbren.";
 </script>
 
