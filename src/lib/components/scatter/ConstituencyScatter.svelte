@@ -10,7 +10,7 @@
 		SimpleStatistics,
 	} from "$lib/types";
 	import { debounce } from "$lib/utils";
-	import { getResponsiveFontSizes } from "./chartUtils";
+	import { getResponsiveFontSizes } from "./ChartUtils";
 	import { loadChartLibraries } from "./chartSetup";
 	import {
 		processChartData,
