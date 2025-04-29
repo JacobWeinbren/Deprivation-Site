@@ -221,11 +221,6 @@ export const metrics: MetricOption[] = [
 		group: "Housing & Households (Tenure)",
 	},
 	{
-		value: "census_HouseSocialRent",
-		label: "Census: Social Renting (Census Count)",
-		group: "Housing & Households (Tenure)",
-	},
-	{
 		value: "socialrent",
 		label: "Proportion Social Housing (%)",
 		group: "Housing & Households (Tenure)",
