@@ -74,7 +74,7 @@ export async function addOrUpdateSourceAndLayers(
 						paint: {
 							// *** Enhanced Highlight Style ***
 							"line-color": "#000000", // Bright Sky Blue (Tailwind sky-500)
-							"line-width": 2, // Increased width
+							"line-width": 4, // Increased width
 							"line-opacity": 0, // Initially hidden
 						},
 						filter: ["==", FEATURE_ID_PROPERTY, ""],

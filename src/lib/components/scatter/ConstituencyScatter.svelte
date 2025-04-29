@@ -331,10 +331,13 @@
 		console.log(`${logPrefix} Cleanup complete.`);
 	});
 
-	// --- Reactive updates ---
 	const debouncedUpdateChart = debounce(updateChart, 100);
 
 	$: if (isMounted && ChartJS && ss) {
+		let needsFullUpdate = false;
+		let needsHighlightUpdate = false;
+
+		// Check data validity first
 		if (!Array.isArray(data)) {
 			console.warn(`${logPrefix} Reactive: data is not an array.`);
 			if (!isLoading && !errorMessage) {
@@ -348,19 +351,20 @@
 				chart = null;
 				currentProcessedData = null;
 			}
-			prevData = null;
+			prevData = null; // Reset prevData
 		} else {
+			// Data is valid, check for changes
 			if (errorMessage === "Chart Error: Waiting for valid data...") {
 				console.log(
 					`${logPrefix} Reactive: Valid data received, clearing 'waiting' error.`
 				);
 				errorMessage = null;
 			}
+
 			const isInitialLoad = prevData === null && data.length > 0;
 			const dataHasChanged = prevData !== data;
 			const partyChanged = selectedParty !== prevSelectedParty;
 			const metricChanged = selectedMetric !== prevSelectedMetric;
-			const highlightChanged = highlightedConstituency !== prevHighlight;
 
 			if (
 				isInitialLoad ||
@@ -368,24 +372,42 @@
 				metricChanged ||
 				dataHasChanged
 			) {
+				needsFullUpdate = true;
 				console.log(
-					`${logPrefix} Reactive: Triggering full update. Initial=${isInitialLoad}, Changes: data=${dataHasChanged}, party=${partyChanged}, metric=${metricChanged}`
+					`${logPrefix} Reactive: Flagging full update. Initial=${isInitialLoad}, Changes: data=${dataHasChanged}, party=${partyChanged}, metric=${metricChanged}`
 				);
+				prevSelectedParty = selectedParty;
+				prevSelectedMetric = selectedMetric;
+				prevData = data; // Update prevData reference *after* check
+			}
+
+			// Check highlight *separately*
+			if (highlightedConstituency !== prevHighlight) {
+				// Only flag highlight update if a full update isn't already happening
+				if (!needsFullUpdate) {
+					needsHighlightUpdate = true;
+					console.log(
+						`${logPrefix} Reactive: Flagging highlight-only update.`
+					);
+				} else {
+					console.log(
+						`${logPrefix} Reactive: Highlight changed, but full update already flagged.`
+					);
+				}
+				// Update prevHighlight regardless of whether only highlight or full update runs
+				prevHighlight = highlightedConstituency;
+			}
+
+			// Execute updates based on flags
+			if (needsFullUpdate) {
 				if (!isLoading) isLoading = true;
 				debouncedUpdateChart(
 					isInitialLoad ? "initial load" : "props change"
 				);
-				prevSelectedParty = selectedParty;
-				prevSelectedMetric = selectedMetric;
-				prevData = data;
-			} else if (highlightChanged) {
-				console.log(
-					`${logPrefix} Reactive: Triggering highlight-only update.`
-				);
+			} else if (needsHighlightUpdate) {
 				updateHighlightOnly();
 			}
 		}
-		prevHighlight = highlightedConstituency;
 	}
 </script>
 

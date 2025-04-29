@@ -1,4 +1,5 @@
 <script lang="ts">
+	// ... (imports, props, state, other functions remain the same) ...
 	import { onMount, onDestroy, createEventDispatcher } from "svelte";
 	import { browser } from "$app/environment";
 	import type {
@@ -10,25 +11,20 @@
 		PartyOption,
 		NavigationControl,
 	} from "$lib/types";
-
-	// Import Config and Base Utils
 	import { getNumericValue, formatDisplayValue } from "$lib/utils";
 	import {
 		metricQuintileColors,
 		partyQuintileColors,
 		FEATURE_NAME_PROPERTY,
 		FEATURE_ID_PROPERTY,
-		SOURCE_LAYER, // Import SOURCE_LAYER
+		SOURCE_LAYER,
 	} from "$lib/config";
-
-	// Import Map Specific Utils, Constants, Setup
+	// Removed unused mapUtils imports
 	import {
 		addOrUpdateSourceAndLayers,
 		updateMapPaint,
 	} from "./mapLayerUtils";
 	import { initializeMapInstance } from "./mapSetup";
-
-	// Import sub-components
 	import MapTooltip from "./MapTooltip.svelte";
 	import MapLegend from "./MapLegend.svelte";
 	import MapErrorOverlay from "./MapErrorOverlay.svelte";
@@ -53,18 +49,14 @@
 	let compareControl: any = null;
 	let navControlLeft: NavigationControl | null = null;
 	let navControlRight: NavigationControl | null = null;
-	let isLoading: boolean = true; // Start true
+	let isLoading: boolean = true;
 	let errorMessage: string | null = null;
 	let isReady: boolean = false;
 	let compareControlInitialized = false;
 	let compareContainerElement: HTMLElement;
-
-	// --- Dynamically Imported Modules ---
 	let maplibregl: typeof import("maplibre-gl") | null = null;
 	let MaplibreCompare: any = null;
 	let MaplibreNavigationControl: typeof NavigationControl | null = null;
-
-	// --- Component State ---
 	let leftLabel: string = "";
 	let leftMinValue: number | null = null;
 	let leftMaxValue: number | null = null;
@@ -81,14 +73,15 @@
 	let prevSelectedParty = selectedParty;
 	let prevSelectedMetric = selectedMetric;
 	let prevHighlight = highlightedConstituency;
-	let prevDataLength = data?.length ?? 0;
+	let prevData: ConstituencyData[] | null = null; // Track data array reference
 
 	const dispatch = createEventDispatcher<{
 		constituencyClick: { name: string };
 	}>();
-	const logPrefix = "[CompareMap]"; // Logging prefix
+	const logPrefix = "[CompareMap]";
 
-	// --- Map Interaction Handlers ---
+	// --- Map Interaction Handlers (handleConstituencyClick, handleMouseMove, handleMouseLeave) ---
+	// ... (Functions remain the same) ...
 	function handleConstituencyClick(e: MapMouseEvent) {
 		if (e.features && e.features.length > 0) {
 			const feature = e.features[0];
@@ -105,7 +98,6 @@
 			}
 		}
 	}
-
 	function handleMouseMove(map: MaplibreMap, e: MapMouseEvent) {
 		if (!e.features || e.features.length === 0) {
 			if (hoveredFeatureId !== null) {
@@ -113,39 +105,30 @@
 			}
 			return;
 		}
-
 		map.getCanvas().style.cursor = "pointer";
 		const feature = e.features[0];
 		const featureId = feature.id;
-
 		if (!containerRect)
 			containerRect = compareContainerElement.getBoundingClientRect();
 		customPopupPosition = { x: e.point.x, y: e.point.y };
-
 		if (featureId === hoveredFeatureId) {
-			return; // Already showing tooltip
+			return;
 		}
-
 		hoveredFeatureId = featureId;
-
 		const name = feature.properties?.[FEATURE_NAME_PROPERTY];
 		const code = feature.properties?.[FEATURE_ID_PROPERTY];
 		const constituencyData = data.find((d) => d.const_code === code);
-
-		// Determine which map side the layer belongs to
 		const layerId = feature.layer.id;
-		const isLeftLayer = layerId.includes("-left"); // Simple check based on convention
+		const isLeftLayer = layerId.includes("-left");
 		const selectedKey = isLeftLayer ? selectedParty : selectedMetric;
 		const label = isLeftLayer ? leftLabel : rightLabel;
 		const value = constituencyData
 			? getNumericValue(constituencyData, selectedKey)
 			: null;
 		const formattedValue = formatDisplayValue(value, label);
-
 		customPopupContent = `<div class="map-tooltip-content"><strong>${name || "Unknown"}</strong><span class="block text-xs">${label.split("(")[0].trim()}: ${formattedValue}</span></div>`;
 		customPopupVisible = true;
 	}
-
 	function handleMouseLeave(map: MaplibreMap) {
 		if (hoveredFeatureId !== null) {
 			map.getCanvas().style.cursor = "";
@@ -154,13 +137,17 @@
 		}
 	}
 
-	// --- Update Map Styles ---
+	// --- Update Map Styles (Full Update) ---
 	function updateMapStyles(forceUpdate = false) {
 		if (!isReady || !mapLeft || !mapRight) {
-			// console.warn(`${logPrefix} updateMapStyles called but maps not ready.`);
+			console.warn(
+				`${logPrefix} updateMapStyles called but maps not ready.`
+			);
 			return;
 		}
-		// console.log(`${logPrefix} Updating map styles. Force: ${forceUpdate}`);
+		console.log(
+			`${logPrefix} Updating map styles (full). Force: ${forceUpdate}`
+		);
 		errorMessage = null;
 
 		// Update labels and min/max values for the legend
@@ -183,7 +170,7 @@
 		rightMaxValue =
 			metricValues.length > 0 ? Math.max(...metricValues) : null;
 
-		// Update paint properties
+		// Update paint properties for both fill and highlight
 		updateMapPaint(
 			mapLeft,
 			"constituency-fills-left",
@@ -202,18 +189,82 @@
 			data,
 			highlightedConstituency
 		);
-		// console.log(`${logPrefix} Map styles update complete.`);
+		console.log(`${logPrefix} Map styles full update complete.`);
 	}
 
-	// --- Lifecycle ---
+	// --- Update Map Highlight Only (Optimized) ---
+	function updateHighlightOnly() {
+		if (!isReady || !mapLeft || !mapRight || !Array.isArray(data)) {
+			console.warn(
+				`${logPrefix} updateHighlightOnly prerequisites not met.`
+			);
+			return;
+		}
+		console.log(
+			`${logPrefix} Updating map highlight only for: ${highlightedConstituency}`
+		);
+
+		// Find the code for the highlighted constituency
+		const highlightedCode = highlightedConstituency
+			? data.find((d) => d.constituency_name === highlightedConstituency)
+					?.const_code
+			: null;
+
+		// Update highlight layer filter and opacity for both maps
+		[mapLeft, mapRight].forEach((mapInstance, index) => {
+			if (!mapInstance) return;
+			const highlightLayerId =
+				index === 0
+					? "constituency-highlight-left"
+					: "constituency-highlight-right";
+			try {
+				if (mapInstance.getLayer(highlightLayerId)) {
+					if (highlightedCode) {
+						mapInstance.setFilter(highlightLayerId, [
+							"==",
+							FEATURE_ID_PROPERTY,
+							highlightedCode,
+						]);
+						mapInstance.setPaintProperty(
+							highlightLayerId,
+							"line-opacity",
+							1
+						);
+					} else {
+						mapInstance.setFilter(highlightLayerId, [
+							"==",
+							FEATURE_ID_PROPERTY,
+							"",
+						]); // Match nothing
+						mapInstance.setPaintProperty(
+							highlightLayerId,
+							"line-opacity",
+							0
+						);
+					}
+				} else {
+					console.warn(
+						`${logPrefix} Highlight layer ${highlightLayerId} not found during highlight update.`
+					);
+				}
+			} catch (error) {
+				console.error(
+					`${logPrefix} Error setting highlight for ${highlightLayerId}:`,
+					error
+				);
+			}
+		});
+		console.log(`${logPrefix} Map highlight-only update complete.`);
+	}
+
+	// --- Lifecycle (onMount, onDestroy remain largely the same) ---
 	onMount(async () => {
 		console.log(`${logPrefix} Component mounted.`);
 		if (!browser) return;
-		isLoading = true; // Start loading
+		isLoading = true;
 		isReady = false;
 		compareControlInitialized = false;
 		errorMessage = null;
-
 		try {
 			console.log(`${logPrefix} Loading libraries...`);
 			const maplibreModule = await import("maplibre-gl");
@@ -221,14 +272,11 @@
 			MaplibreNavigationControl = maplibreModule.NavigationControl;
 			MaplibreCompare = (await import("@maplibre/maplibre-gl-compare"))
 				.default;
-
 			if (!maplibregl || !MaplibreCompare || !MaplibreNavigationControl) {
 				throw new Error("Failed to load MapLibre libraries");
 			}
 			console.log(`${logPrefix} Libraries loaded.`);
-
 			const handleError = (side: string) => (e: MapErrorEvent) => {
-				// Avoid setting error if it's just a tile load error (can be transient)
 				if (e.error?.message?.includes("Failed to load tile")) {
 					console.warn(
 						`${logPrefix} Tile load error (${side}):`,
@@ -242,9 +290,8 @@
 				);
 				errorMessage = `${side} map error: ${e.error?.message || "Unknown error"}`;
 				isLoading = false;
-				isReady = false; // Mark as not ready on critical error
+				isReady = false;
 			};
-
 			console.log(`${logPrefix} Initializing map instances...`);
 			const [mapLeftResult, mapRightResult] = await Promise.all([
 				initializeMapInstance(
@@ -260,7 +307,6 @@
 					handleError("Right")
 				),
 			]).catch((initError) => {
-				// Catch errors from initializeMapInstance promise rejection
 				console.error(
 					`${logPrefix} Map initialization failed:`,
 					initError
@@ -270,43 +316,34 @@
 					: new Error("Map initialization failed.");
 			});
 			console.log(
-				`${logPrefix} Map instances initialized (pending load event).`
+				`${logPrefix} Map instances initialized (maps loaded).`
 			);
-
-			// Destructure results after promise resolution
 			mapLeft = mapLeftResult.map;
 			navControlLeft = mapLeftResult.navControl;
 			mapRight = mapRightResult.map;
 			navControlRight = mapRightResult.navControl;
-
-			// Note: initializeMapInstance now resolves *after* 'load' event
-
 			console.log(`${logPrefix} Adding sources and layers...`);
 			await Promise.all([
 				addOrUpdateSourceAndLayers(
 					mapLeft,
-					"constituencies-source", // Shared source ID
+					"constituencies-source",
 					"constituency-fills-left",
 					"constituency-highlight-left"
 				),
 				addOrUpdateSourceAndLayers(
 					mapRight,
-					"constituencies-source", // Shared source ID
+					"constituencies-source",
 					"constituency-fills-right",
 					"constituency-highlight-right"
 				),
 			]);
 			console.log(`${logPrefix} Sources and layers added.`);
-
-			// Wait for maps to be idle after adding layers (extra safety)
 			console.log(`${logPrefix} Waiting for maps to idle...`);
 			await Promise.all([
 				new Promise<void>((resolve) => mapLeft!.once("idle", resolve)),
 				new Promise<void>((resolve) => mapRight!.once("idle", resolve)),
 			]);
 			console.log(`${logPrefix} Maps are idle.`);
-
-			// Setup Compare Control
 			if (mapLeft && mapRight && compareContainerElement) {
 				console.log(`${logPrefix} Initializing compare control...`);
 				try {
@@ -338,8 +375,6 @@
 					"Maps or container unavailable for compare init"
 				);
 			}
-
-			// Setup event listeners
 			console.log(`${logPrefix} Adding event listeners...`);
 			mapLeft.on(
 				"click",
@@ -363,26 +398,22 @@
 			mapRight.on("mouseleave", "constituency-fills-right", () =>
 				handleMouseLeave(mapRight!)
 			);
-
-			// Maps are ready
 			console.log(
 				`${logPrefix} Maps are ready. Performing initial style update.`
 			);
 			isReady = true;
-			updateMapStyles(true); // Initial style update
-			isLoading = false; // Set loading false *after* everything is ready
+			updateMapStyles(true);
+			isLoading = false;
 			console.log(`${logPrefix} Map initialization complete.`);
 		} catch (error: any) {
 			console.error(`${logPrefix} Error during map setup:`, error);
 			errorMessage = `Map setup failed: ${error.message || error}`;
-			isLoading = false; // Ensure loading stops on error
+			isLoading = false;
 			isReady = false;
 		}
 	});
-
 	onDestroy(() => {
 		console.log(`${logPrefix} Component destroying...`);
-		// Remove event listeners first
 		try {
 			mapLeft?.off(
 				"click",
@@ -417,8 +448,6 @@
 		} catch (e) {
 			console.warn(`${logPrefix} Error removing listeners:`, e);
 		}
-
-		// Remove controls and maps
 		try {
 			compareControl?.remove();
 			if (navControlLeft && mapLeft?.hasControl(navControlLeft))
@@ -430,8 +459,6 @@
 		} catch (e) {
 			console.warn(`${logPrefix} Error removing map resources:`, e);
 		}
-
-		// Clear state
 		mapLeft = null;
 		mapRight = null;
 		compareControl = null;
@@ -445,21 +472,55 @@
 	});
 
 	// --- Reactive Update Logic ---
-	$: {
-		if (
-			browser &&
-			isReady && // Only update if maps are fully ready
-			(data?.length !== prevDataLength ||
-				selectedParty !== prevSelectedParty ||
-				selectedMetric !== prevSelectedMetric ||
-				highlightedConstituency !== prevHighlight)
-		) {
-			// console.log(`${logPrefix} Reactive change detected, updating map styles.`);
-			updateMapStyles();
-			prevDataLength = data?.length ?? 0;
-			prevSelectedParty = selectedParty;
-			prevSelectedMetric = selectedMetric;
-			prevHighlight = highlightedConstituency;
+	$: if (browser && isReady) {
+		let needsFullUpdate = false;
+		let needsHighlightUpdate = false;
+
+		// Check data validity first (although parent should ensure this)
+		if (!Array.isArray(data)) {
+			console.warn(`${logPrefix} Reactive: data is not an array.`);
+			// Optionally set an error state, though parent handles initial load error
+			if (!isLoading && !errorMessage) {
+				errorMessage = "Map Error: Invalid data received.";
+			}
+			prevData = null; // Reset prevData
+		} else {
+			// Data is valid, check for changes
+			const dataHasChanged = prevData !== data; // Compare references
+			const partyChanged = selectedParty !== prevSelectedParty;
+			const metricChanged = selectedMetric !== prevSelectedMetric;
+
+			if (dataHasChanged || partyChanged || metricChanged) {
+				needsFullUpdate = true;
+				console.log(
+					`${logPrefix} Reactive: Flagging full update. Changes: data=${dataHasChanged}, party=${partyChanged}, metric=${metricChanged}`
+				);
+				prevSelectedParty = selectedParty;
+				prevSelectedMetric = selectedMetric;
+				prevData = data; // Update prevData reference
+			}
+
+			// Check highlight *separately*
+			if (highlightedConstituency !== prevHighlight) {
+				if (!needsFullUpdate) {
+					needsHighlightUpdate = true;
+					console.log(
+						`${logPrefix} Reactive: Flagging highlight-only update.`
+					);
+				} else {
+					console.log(
+						`${logPrefix} Reactive: Highlight changed, but full update already flagged.`
+					);
+				}
+				prevHighlight = highlightedConstituency; // Update prevHighlight regardless
+			}
+
+			// Execute updates based on flags
+			if (needsFullUpdate) {
+				updateMapStyles(); // This handles fill and highlight
+			} else if (needsHighlightUpdate) {
+				updateHighlightOnly(); // Only update highlight layers
+			}
 		}
 	}
 
@@ -469,12 +530,6 @@
 			console.log(`${logPrefix} Retrying map operation...`);
 			errorMessage = null;
 			isLoading = true;
-			// Attempt to re-run the setup logic by forcing a re-mount?
-			// Or simply try updating styles if isReady was somehow true?
-			// For simplicity, let's assume a full re-init might be needed.
-			// A simple way is to reload the page, but less ideal UX.
-			// A more complex way involves resetting state and re-triggering onMount logic.
-			// Let's just try updating styles if possible, otherwise indicate failure.
 			setTimeout(() => {
 				if (isReady && mapLeft && mapRight) {
 					console.log(
