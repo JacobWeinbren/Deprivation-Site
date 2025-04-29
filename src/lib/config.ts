@@ -363,6 +363,41 @@ export const metrics: MetricOption[] = [
 		label: "Census: Industry Public Admin/Defence",
 		group: "Census: Industry",
 	},
+	{
+		value: "swing_con_lab_19_24",
+		label: "Con-Lab Swing 19-24 (%)",
+		group: "Politics",
+	},
+	{
+		value: "Con19",
+		label: "Conservative Voteshare 2019 (%)",
+		group: "Politics",
+	},
+	{
+		value: "Lab19",
+		label: "Labour Voteshare 2019 (%)",
+		group: "Politics",
+	},
+	{
+		value: "LD19",
+		label: "Lib Dem Voteshare 2019 (%)",
+		group: "Politics",
+	},
+	{
+		value: "Brexit19",
+		label: "Brexit Party Voteshare 2019 (%)",
+		group: "Politics",
+	},
+	{
+		value: "Green19",
+		label: "Green Voteshare 2019 (%)",
+		group: "Politics",
+	},
+	{
+		value: "Other19",
+		label: "Other Voteshare 2019 (%)",
+		group: "Politics",
+	},
 ];
 
 // --- Party/Voteshare Configuration ---

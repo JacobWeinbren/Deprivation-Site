@@ -1,3 +1,5 @@
+// src/lib/components/map/mapLayerUtils.ts
+
 import type { MaplibreMap, MapDataEvent, ConstituencyData } from "$lib/types";
 import { getNumericValue } from "$lib/utils";
 import {
@@ -12,6 +14,7 @@ import { quantile } from "simple-statistics";
 
 const logPrefix = "[MapLayers]";
 
+// addOrUpdateSourceAndLayers function remains the same...
 export async function addOrUpdateSourceAndLayers(
 	mapInstance: MaplibreMap,
 	sourceId: string,
@@ -39,7 +42,6 @@ export async function addOrUpdateSourceAndLayers(
 				console.log(
 					`${logPrefix} Adding layers for source '${sourceId}'`
 				);
-				// Add Fill Layer
 				if (!mapInstance.getLayer(baseFillLayerId)) {
 					mapInstance.addLayer(
 						{
@@ -49,8 +51,9 @@ export async function addOrUpdateSourceAndLayers(
 							"source-layer": SOURCE_LAYER,
 							paint: {
 								"fill-color": NO_DATA_COLOR,
-								"fill-opacity": 0.75,
-								"fill-outline-color": "rgba(0,0,0,0.1)",
+								"fill-opacity": 1,
+								/* Base opacity */ "fill-outline-color":
+									"rgba(0,0,0,0.1)",
 							},
 						},
 						mapInstance.getLayer(baseHighlightLayerId)
@@ -63,8 +66,6 @@ export async function addOrUpdateSourceAndLayers(
 						`${logPrefix} Layer already exists: ${baseFillLayerId}`
 					);
 				}
-
-				// Add Highlight Layer (with enhanced style)
 				if (!mapInstance.getLayer(baseHighlightLayerId)) {
 					mapInstance.addLayer({
 						id: baseHighlightLayerId,
@@ -72,10 +73,9 @@ export async function addOrUpdateSourceAndLayers(
 						source: sourceId,
 						"source-layer": SOURCE_LAYER,
 						paint: {
-							// *** Enhanced Highlight Style ***
-							"line-color": "#000000", // Bright Sky Blue (Tailwind sky-500)
-							"line-width": 4, // Increased width
-							"line-opacity": 0, // Initially hidden
+							"line-color": "#000",
+							"line-width": 3,
+							"line-opacity": 0,
 						},
 						filter: ["==", FEATURE_ID_PROPERTY, ""],
 					});
@@ -175,7 +175,10 @@ export async function addOrUpdateSourceAndLayers(
 	});
 }
 
-// updateMapPaint function remains the same as previous version
+/**
+ * Updates the map paint properties (fill-color, fill-opacity, highlight filter/opacity)
+ * based on the selected variable and data.
+ */
 export function updateMapPaint(
 	mapInstance: MaplibreMap | null,
 	fillLayerId: string,
@@ -183,7 +186,7 @@ export function updateMapPaint(
 	variableType: "party" | "metric",
 	variableKey: string,
 	data: ConstituencyData[],
-	highlightedConstituencyName: string | null
+	highlightedConstituencyName: string | null // Pass the name
 ) {
 	if (
 		!mapInstance ||
@@ -193,6 +196,14 @@ export function updateMapPaint(
 	) {
 		return;
 	}
+
+	// Find the code of the highlighted constituency
+	const highlightedCode = highlightedConstituencyName
+		? data.find((d) => d.constituency_name === highlightedConstituencyName)
+				?.const_code
+		: null;
+
+	// --- Calculate Color Expression (remains the same) ---
 	const values: number[] = [];
 	const featureData: { [code: string]: number | null } = {};
 	data.forEach((d) => {
@@ -248,31 +259,50 @@ export function updateMapPaint(
 		matchExpression.push(code, color);
 	});
 	matchExpression.push(NO_DATA_COLOR);
+
+	// --- Define Opacity Expression ---
+	const baseOpacity = 1;
+	const dimmedOpacity = 0.2;
+	const highlightedOpacity = 1;
+
+	const opacityExpression = highlightedCode
+		? [
+				"case",
+				["==", ["id"], highlightedCode], // Check if feature ID matches highlighted code
+				highlightedOpacity, // Opacity if highlighted
+				dimmedOpacity, // Opacity if *not* highlighted (but something *is* highlighted)
+		  ]
+		: baseOpacity; // Opacity if *nothing* is highlighted
+
+	// --- Update Fill Layer ---
 	try {
 		mapInstance.setPaintProperty(
 			fillLayerId,
 			"fill-color",
 			matchExpression
 		);
-		mapInstance.setPaintProperty(fillLayerId, "fill-opacity", 0.75);
+		// *** SET DYNAMIC OPACITY ***
+		mapInstance.setPaintProperty(
+			fillLayerId,
+			"fill-opacity",
+			opacityExpression
+		);
 	} catch (error) {
 		console.error(
 			`${logPrefix} Error setting fill paint for ${fillLayerId}:`,
 			error
 		);
 	}
-	const highlightedConstituencyCode = highlightedConstituencyName
-		? data.find((d) => d.constituency_name === highlightedConstituencyName)
-				?.const_code
-		: null;
+
+	// --- Update Highlight Layer (Filter/Opacity) ---
 	try {
-		if (highlightedConstituencyCode) {
+		if (highlightedCode) {
 			mapInstance.setFilter(highlightLayerId, [
 				"==",
 				FEATURE_ID_PROPERTY,
-				highlightedConstituencyCode,
+				highlightedCode,
 			]);
-			mapInstance.setPaintProperty(highlightLayerId, "line-opacity", 1);
+			mapInstance.setPaintProperty(highlightLayerId, "line-opacity", 1); // Highlight line always fully opaque when shown
 		} else {
 			mapInstance.setFilter(highlightLayerId, [
 				"==",

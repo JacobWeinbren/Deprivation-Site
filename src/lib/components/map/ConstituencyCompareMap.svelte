@@ -11,6 +11,7 @@
 		PartyOption,
 		NavigationControl,
 	} from "$lib/types";
+	// *** Ensure hexToRgba is imported if needed, though not directly used in the fix ***
 	import { getNumericValue, formatDisplayValue } from "$lib/utils";
 	import {
 		metricQuintileColors,
@@ -18,8 +19,8 @@
 		FEATURE_NAME_PROPERTY,
 		FEATURE_ID_PROPERTY,
 		SOURCE_LAYER,
+		NO_DATA_COLOR, // Import NO_DATA_COLOR if needed elsewhere
 	} from "$lib/config";
-	// Removed unused mapUtils imports
 	import {
 		addOrUpdateSourceAndLayers,
 		updateMapPaint,
@@ -171,6 +172,7 @@
 			metricValues.length > 0 ? Math.max(...metricValues) : null;
 
 		// Update paint properties for both fill and highlight
+		// The updateMapPaint function now handles both fill color/opacity and highlight line
 		updateMapPaint(
 			mapLeft,
 			"constituency-fills-left",
@@ -178,7 +180,7 @@
 			"party",
 			selectedParty,
 			data,
-			highlightedConstituency
+			highlightedConstituency // Pass name here
 		);
 		updateMapPaint(
 			mapRight,
@@ -187,12 +189,13 @@
 			"metric",
 			selectedMetric,
 			data,
-			highlightedConstituency
+			highlightedConstituency // Pass name here
 		);
 		console.log(`${logPrefix} Map styles full update complete.`);
 	}
 
 	// --- Update Map Highlight Only (Optimized) ---
+	// *** MODIFIED FUNCTION ***
 	function updateHighlightOnly() {
 		if (!isReady || !mapLeft || !mapRight || !Array.isArray(data)) {
 			console.warn(
@@ -210,13 +213,34 @@
 					?.const_code
 			: null;
 
-		// Update highlight layer filter and opacity for both maps
+		// Define opacities
+		const baseOpacity = 1;
+		const dimmedOpacity = 0.2;
+		const highlightedOpacity = 1; // Highlighted feature remains fully opaque
+
+		// Define the opacity expression for the fill layers
+		const fillOpacityExpression = highlightedCode
+			? [
+					"case",
+					["==", ["id"], highlightedCode], // Check if feature ID matches highlighted code
+					highlightedOpacity, // Opacity if highlighted
+					dimmedOpacity, // Opacity if *not* highlighted (but something *is* highlighted)
+				]
+			: baseOpacity; // Opacity if *nothing* is highlighted
+
+		// Update highlight layer filter/opacity AND fill layer opacity for both maps
 		[mapLeft, mapRight].forEach((mapInstance, index) => {
 			if (!mapInstance) return;
+			const fillLayerId =
+				index === 0
+					? "constituency-fills-left"
+					: "constituency-fills-right";
 			const highlightLayerId =
 				index === 0
 					? "constituency-highlight-left"
 					: "constituency-highlight-right";
+
+			// Update Highlight Line Layer
 			try {
 				if (mapInstance.getLayer(highlightLayerId)) {
 					if (highlightedCode) {
@@ -229,7 +253,7 @@
 							highlightLayerId,
 							"line-opacity",
 							1
-						);
+						); // Show highlight line
 					} else {
 						mapInstance.setFilter(highlightLayerId, [
 							"==",
@@ -240,7 +264,7 @@
 							highlightLayerId,
 							"line-opacity",
 							0
-						);
+						); // Hide highlight line
 					}
 				} else {
 					console.warn(
@@ -249,7 +273,27 @@
 				}
 			} catch (error) {
 				console.error(
-					`${logPrefix} Error setting highlight for ${highlightLayerId}:`,
+					`${logPrefix} Error setting highlight line for ${highlightLayerId}:`,
+					error
+				);
+			}
+
+			// *** ADDED: Update Fill Layer Opacity ***
+			try {
+				if (mapInstance.getLayer(fillLayerId)) {
+					mapInstance.setPaintProperty(
+						fillLayerId,
+						"fill-opacity",
+						fillOpacityExpression // Apply the calculated opacity expression
+					);
+				} else {
+					console.warn(
+						`${logPrefix} Fill layer ${fillLayerId} not found during highlight update.`
+					);
+				}
+			} catch (error) {
+				console.error(
+					`${logPrefix} Error setting fill opacity for ${fillLayerId}:`,
 					error
 				);
 			}
@@ -326,13 +370,13 @@
 			await Promise.all([
 				addOrUpdateSourceAndLayers(
 					mapLeft,
-					"constituencies-source",
+					"constituencies-source", // Use same source ID
 					"constituency-fills-left",
 					"constituency-highlight-left"
 				),
 				addOrUpdateSourceAndLayers(
 					mapRight,
-					"constituencies-source",
+					"constituencies-source", // Use same source ID
 					"constituency-fills-right",
 					"constituency-highlight-right"
 				),
@@ -402,7 +446,7 @@
 				`${logPrefix} Maps are ready. Performing initial style update.`
 			);
 			isReady = true;
-			updateMapStyles(true);
+			updateMapStyles(true); // Initial full update
 			isLoading = false;
 			console.log(`${logPrefix} Map initialization complete.`);
 		} catch (error: any) {
@@ -519,7 +563,7 @@
 			if (needsFullUpdate) {
 				updateMapStyles(); // This handles fill and highlight
 			} else if (needsHighlightUpdate) {
-				updateHighlightOnly(); // Only update highlight layers
+				updateHighlightOnly(); // *** This now correctly updates fill opacity ***
 			}
 		}
 	}

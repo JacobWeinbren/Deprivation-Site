@@ -1,33 +1,33 @@
+// src/lib/components/scatter/chartLogic.ts
+
 import type {
 	ChartConfiguration,
 	ChartOptions,
 	Point,
 	TooltipCallbacks,
 	FontSpec,
-	ChartJSChart, // Use renamed type
+	ChartJSChart,
 	ConstituencyData,
 	MetricOption,
 	PartyOption,
 	SimpleStatistics,
 } from "$lib/types";
-import { getNumericValue } from "$lib/utils";
+// *** Import hexToRgba ***
+import { getNumericValue, hexToRgba } from "$lib/utils";
 import { getResponsiveFontSizes, formatChartLabel } from "./chartUtils";
-import { metricQuintileColors, NO_DATA_COLOR } from "$lib/config"; // Use central config
+import { metricQuintileColors, NO_DATA_COLOR } from "$lib/config";
 
+// ProcessChartData and generateChartConfig functions remain the same...
 export interface ProcessedChartData {
-	plotPoints: (Point & { label: string; id: string })[]; // Points actually plotted
-	statPoints: [number, number][]; // Points used for statistical calculations
+	plotPoints: (Point & { label: string; id: string })[];
+	statPoints: [number, number][];
 	pearsonR: number | null;
 	rSquared: number | null;
-	n: number; // Number of points used for stats
+	n: number;
 	regressionLinePoints: Point[];
-	metricQuantiles: number[]; // Quantiles based on the selected metric (X-axis)
-	xValuesForQuantiles: number[]; // Values used for quantile calculation
+	metricQuantiles: number[];
+	xValuesForQuantiles: number[];
 }
-
-/**
- * Processes raw constituency data into formats needed for chart plotting and statistics.
- */
 export function processChartData(
 	data: ConstituencyData[],
 	selectedMetric: string,
@@ -140,10 +140,6 @@ export function processChartData(
 		xValuesForQuantiles,
 	};
 }
-
-/**
- * Generates the Chart.js configuration object.
- */
 export function generateChartConfig(
 	processedData: ProcessedChartData,
 	props: {
@@ -170,28 +166,20 @@ export function generateChartConfig(
 		compact,
 		containerWidth,
 	} = props;
-
-	// *** Define isSwingMetricY here based on props ***
 	const isSwingMetricY = selectedParty === "swing_con_lab_19_24";
-	// We don't need isSwingMetricX in this function scope
-
 	const fontSizes = getResponsiveFontSizes(containerWidth);
-
 	const selectedPartyLabel =
 		parties.find((p) => p.value === selectedParty)?.label || selectedParty;
 	const selectedMetricLabel =
 		metrics.find((m) => m.value === selectedMetric)?.label ||
 		selectedMetric;
-
-	// Calculate Point Colors based on Metric (X-value) Quantiles
-	const pointBackgroundColors = plotPoints.map((point) => {
+	// --- Calculate INITIAL Point Colors (used by applyChartHighlight) ---
+	// Store the base hex color for each point before applying opacity
+	const baseHexColors = plotPoints.map((point) => {
 		const value = point.x;
-		// Check if X-axis is swing (needed for zero handling)
 		const isSwingMetricX = selectedMetric === "swing_con_lab_19_24";
-
 		if (value === null || value === undefined) return NO_DATA_COLOR;
 		if (!isSwingMetricX && value === 0) return NO_DATA_COLOR;
-
 		if (metricQuantiles.length < 4 || xValuesForQuantiles.length < 5) {
 			if (
 				xValuesForQuantiles.length < 2 ||
@@ -220,16 +208,22 @@ export function generateChartConfig(
 			return metricQuintileColors[4];
 		}
 	});
+	// Initial background colors apply base opacity
+	const initialBackgroundColors = baseHexColors.map((hex) =>
+		hexToRgba(hex, 1)
+	);
 
 	const defaultPointSize = compact ? 2.5 : 3;
 	const pointHoverSize = compact ? 5 : 6;
-
 	const datasets: ChartConfiguration<"scatter">["data"]["datasets"] = [
 		{
 			label: "Constituencies",
 			data: plotPoints,
 			parsing: false,
-			backgroundColor: pointBackgroundColors,
+			// *** Use initial colors with base opacity ***
+			backgroundColor: initialBackgroundColors,
+			// Store base hex colors for reference in applyChartHighlight
+			_baseHexColors: baseHexColors,
 			borderColor: "transparent",
 			borderWidth: 0,
 			pointRadius: defaultPointSize,
@@ -242,7 +236,6 @@ export function generateChartConfig(
 			order: 1,
 		},
 	];
-
 	if (regressionLinePoints.length > 1) {
 		datasets.push({
 			type: "line",
@@ -261,8 +254,6 @@ export function generateChartConfig(
 			pointHoverRadius: 0,
 		});
 	}
-
-	// Tooltip Callbacks
 	const tooltipCallbacks: Partial<TooltipCallbacks<"scatter">> = {
 		title: (tooltipItems: any[]) => {
 			const item = tooltipItems[0];
@@ -279,8 +270,6 @@ export function generateChartConfig(
 			];
 		},
 	};
-
-	// Chart Options
 	const options: ChartOptions<"scatter"> = {
 		responsive: true,
 		maintainAspectRatio: false,
@@ -290,11 +279,7 @@ export function generateChartConfig(
 				? { top: 4, right: 4, bottom: 4, left: 0 }
 				: { top: 8, right: 10, bottom: 5, left: 5 },
 		},
-		interaction: {
-			mode: "nearest",
-			axis: "xy",
-			intersect: true,
-		},
+		interaction: { mode: "nearest", axis: "xy", intersect: true },
 		plugins: {
 			legend: { display: false },
 			tooltip: {
@@ -358,7 +343,6 @@ export function generateChartConfig(
 			y: {
 				type: "linear",
 				position: "left",
-				// *** Use the locally defined isSwingMetricY ***
 				beginAtZero: !isSwingMetricY,
 				title: {
 					display: true,
@@ -397,53 +381,77 @@ export function generateChartConfig(
 			}
 		},
 	};
-
-	return {
-		type: "scatter",
-		data: { datasets },
-		options: options,
-	};
+	return { type: "scatter", data: { datasets }, options: options };
 }
 
 /**
- * Applies highlight styling (point size, border) to the chart dataset.
+ * Applies highlight styling (point size, border, opacity) to the chart dataset.
  * Modifies the dataset directly.
  */
 export function applyChartHighlight(
-	dataset: ChartConfiguration<"scatter">["data"]["datasets"][0] | undefined,
+	dataset: any, // Use any temporarily as we added a custom prop
 	plotPoints: ProcessedChartData["plotPoints"],
 	highlightedConstituency: string | null,
 	compact: boolean
 ) {
-	if (!dataset || !plotPoints || !Array.isArray(dataset.data)) return;
+	if (
+		!dataset ||
+		!plotPoints ||
+		!Array.isArray(dataset.data) ||
+		!dataset._baseHexColors
+	) {
+		console.warn("ApplyChartHighlight: prerequisites not met.");
+		return;
+	}
 
 	const defaultPointSize = compact ? 2.5 : 3;
-	// *** Enhanced Highlight Style ***
-	const highlightedPointSize = compact ? 7 : 8; // Significantly larger
-	const highlightBorderColor = "#0000000"; // Bright Sky Blue (Tailwind sky-500)
-	const highlightBorderWidth = 3; // Increased border width
+	const highlightedPointSize = compact ? 7 : 8;
+	const highlightBorderColor = "#000000"; // Black outline
+	const highlightBorderWidth = 3;
+
+	// Define opacities
+	const baseOpacity = 1;
+	const dimmedOpacity = 0.2;
+	const highlightedOpacity = 1;
 
 	try {
+		// Update point styles based on highlight
 		dataset.pointRadius = plotPoints.map((p) =>
 			p.label === highlightedConstituency
 				? highlightedPointSize
 				: defaultPointSize
 		);
-		dataset.borderColor = plotPoints.map(
-			(p) =>
-				p.label === highlightedConstituency
-					? highlightBorderColor
-					: "transparent" // Keep non-highlighted transparent
+		dataset.borderColor = plotPoints.map((p) =>
+			p.label === highlightedConstituency
+				? highlightBorderColor
+				: "transparent"
 		);
-		dataset.borderWidth = plotPoints.map(
-			(p) =>
-				p.label === highlightedConstituency ? highlightBorderWidth : 0 // Apply border only to highlighted
+		dataset.borderWidth = plotPoints.map((p) =>
+			p.label === highlightedConstituency ? highlightBorderWidth : 0
 		);
+
+		// *** Update background colors with opacity ***
+		dataset.backgroundColor = plotPoints.map((p, index) => {
+			const baseHex = dataset._baseHexColors[index] || NO_DATA_COLOR; // Fallback
+			if (highlightedConstituency === null) {
+				// Nothing highlighted, use base opacity
+				return hexToRgba(baseHex, baseOpacity);
+			} else {
+				// Something is highlighted
+				return p.label === highlightedConstituency
+					? hexToRgba(baseHex, highlightedOpacity) // Highlighted point opacity
+					: hexToRgba(baseHex, dimmedOpacity); // Dimmed point opacity
+			}
+		});
 	} catch (e) {
 		console.error("Error applying chart highlight styles:", e);
 		// Reset to defaults in case of error
 		dataset.pointRadius = defaultPointSize;
 		dataset.borderColor = "transparent";
 		dataset.borderWidth = 0;
+		// Reset background colors to base opacity
+		dataset.backgroundColor = dataset._baseHexColors.map((hex: string) =>
+			hexToRgba(hex, baseOpacity)
+		);
 	}
 }
