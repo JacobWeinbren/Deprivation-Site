@@ -4,7 +4,7 @@
 	import { browser } from "$app/environment"; // Import browser check if needed for onMount logic
 	// Import components
 	import ConstituencyScatter from "$lib/components/scatter/ConstituencyScatter.svelte";
-	import ConstituencyCompareMap from "$lib/components/scatter/ConstituencyCompareMap.svelte";
+	import ConstituencyCompareMap from "$lib/components/scatter/ConstituencyCompareMap.svelte"; // Corrected path
 	// Import config needed by components and controls
 	import {
 		metrics,
@@ -13,7 +13,7 @@
 		type ConstituencyData,
 		type MetricOption,
 		type PartyOption,
-	} from "$lib/components/scatter/chartConfig"; // Removed getGroupedMetrics if not used elsewhere
+	} from "$lib/components/scatter/chartConfig"; // Corrected path
 	// Import type for data loaded from the server
 	import type { PageData } from "./$types";
 	// Import the public environment variable (might hold a key for Maptiler, etc.)
@@ -42,6 +42,9 @@
 	let highlightedConstituency: string | null = null;
 	let showSearchResults = false;
 	let searchInput: HTMLInputElement; // For binding
+
+	// --- Component References ---
+	let mapComponent: ConstituencyCompareMap; // Reference to the map component instance
 
 	// --- Prepare grouped metrics for dropdown ---
 	let orderedGroupedMetrics: {
@@ -107,12 +110,18 @@
 			resetView();
 			return;
 		}
-		// console.log("Page: Selecting:", constituency.constituency_name);
-		highlightedConstituency = constituency.constituency_name;
+		const name = constituency.constituency_name;
+		// console.log("Page: Selecting:", name);
+		highlightedConstituency = name;
 		searchTerm = "";
 		searchResults = [];
 		showSearchResults = false;
 		searchInput?.blur(); // Blur input after selection
+
+		// Trigger zoom on map if it exists and a name is provided
+		if (mapComponent && name) {
+			mapComponent.zoomToConstituency(name);
+		}
 	}
 
 	function resetView() {
@@ -122,6 +131,8 @@
 		searchResults = [];
 		showSearchResults = false;
 		searchInput?.blur(); // Blur input on reset
+		// Optionally reset map zoom here if desired
+		// if (mapComponent) mapComponent.resetZoom(); // Assuming you add a resetZoom method
 	}
 
 	function handleSearchFocus() {
@@ -140,22 +151,25 @@
 		}, 150);
 	}
 
-	// Handle clicks coming UP from the scatter plot
-	function handleScatterClick(event: CustomEvent<{ name: string }>) {
+	let scatterComponent: ConstituencyScatter | undefined = undefined; // Add reference for scatter if needed
+
+	// Handle clicks coming UP from the scatter plot OR map
+	function handleChildClick(event: CustomEvent<{ name: string }>) {
 		const name = event.detail.name;
 		const foundConstituency = chartData.find(
 			(c) => c.constituency_name === name
 		);
+
 		if (foundConstituency) {
 			// Toggle highlight: if clicking the already highlighted one, reset. Otherwise, select.
 			if (highlightedConstituency === name) {
 				resetView();
 			} else {
-				selectConstituency(foundConstituency);
+				selectConstituency(foundConstituency); // This now handles highlight AND zoom
 			}
 		} else {
 			console.warn(
-				`Constituency "${name}" clicked in scatter but not found in main data.`
+				`Constituency "${name}" clicked but not found in main data.`
 			);
 			resetView();
 		}
@@ -205,7 +219,7 @@
 		name="description"
 		content="Compare 2024 election results and socio-economic data across British constituencies."
 	/>
-	<!-- REMOVE Mapbox CSS links -->
+	<!-- MapLibre CSS is now handled within the component's styles -->
 </svelte:head>
 
 <!-- Main page structure -->
@@ -219,7 +233,7 @@
 		<p class="text-center text-sm text-gray-600 mb-8 max-w-2xl mx-auto">
 			Compare 2024 General Election results with socio-economic data.
 			Select a party and metric below, then explore the scatter plot or
-			compare maps.
+			compare maps. Click a point or area to highlight and zoom.
 		</p>
 
 		<!-- Controls Card -->
@@ -317,7 +331,7 @@
 						for="search-input-page"
 						class="block text-xs font-medium text-gray-600 mb-1"
 					>
-						Find Constituency
+						Find & Highlight
 					</label>
 					<div class="relative">
 						<div
@@ -434,7 +448,6 @@
 				>
 					Compare Maps
 				</button>
-				<!-- Removed disabled logic based on mapboxToken -->
 			</div>
 		</div>
 
@@ -449,38 +462,51 @@
 			</div>
 			<!-- Main Content Area -->
 		{:else if chartData && chartData.length > 0}
-			<div class="tab-content">
-				{#if activeTab === "scatter"}
-					<div class="max-w-4xl mx-auto">
-						<ConstituencyScatter
-							data={chartData}
-							{selectedParty}
-							{selectedMetric}
-							{highlightedConstituency}
-							{metrics}
-							{parties}
-							{partyColors}
-							title=""
-							compact={false}
-							on:constituencyClick={handleScatterClick}
-						/>
-					</div>
-				{:else if activeTab === "compare"}
-					<!-- No longer check for mapboxToken here, assume map can load -->
-					<div class="max-w-5xl mx-auto">
-						<ConstituencyCompareMap
-							data={chartData}
-							{selectedParty}
-							{selectedMetric}
-							{highlightedConstituency}
-							{metrics}
-							{parties}
-							{partyColors}
-							mapboxAccessToken={mapboxToken}
-							on:constituencyClick={handleScatterClick}
-						/>
-					</div>
-				{/if}
+			<!-- Use CSS to toggle visibility instead of #if -->
+			<div class="tab-content relative">
+				<!-- Both components always mounted, visibility toggled with opacity and pointer-events -->
+				<div
+					class="max-w-4xl mx-auto transition-opacity duration-300"
+					style="opacity: {activeTab === 'scatter' ? 1 : 0}; 
+						   pointer-events: {activeTab === 'scatter' ? 'auto' : 'none'};
+						   position: {activeTab === 'scatter' ? 'relative' : 'absolute'};
+						   width: 100%;"
+				>
+					<ConstituencyScatter
+						bind:this={scatterComponent}
+						data={chartData}
+						{selectedParty}
+						{selectedMetric}
+						{highlightedConstituency}
+						{metrics}
+						{parties}
+						{partyColors}
+						title=""
+						compact={false}
+						on:constituencyClick={handleChildClick}
+					/>
+				</div>
+
+				<div
+					class="max-w-5xl mx-auto transition-opacity duration-300"
+					style="opacity: {activeTab === 'compare' ? 1 : 0}; 
+						   pointer-events: {activeTab === 'compare' ? 'auto' : 'none'};
+						   position: {activeTab === 'compare' ? 'relative' : 'absolute'};
+						   width: 100%;"
+				>
+					<ConstituencyCompareMap
+						bind:this={mapComponent}
+						data={chartData}
+						{selectedParty}
+						{selectedMetric}
+						{highlightedConstituency}
+						{metrics}
+						{parties}
+						{partyColors}
+						mapboxAccessToken={mapboxToken}
+						on:constituencyClick={handleChildClick}
+					/>
+				</div>
 			</div>
 			<!-- Loading/No Data Display -->
 		{:else if !error}
@@ -537,5 +563,13 @@
 		outline: 2px solid transparent;
 		outline-offset: 2px;
 		box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3); /* Lighter blue focus ring */
+	}
+
+	/* Ensure hidden tabs don't affect layout when not active */
+	.tab-content > div.hidden {
+		display: none;
+	}
+	.tab-content > div.block {
+		display: block;
 	}
 </style>

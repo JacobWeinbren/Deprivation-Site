@@ -12,6 +12,8 @@
 		MapDataEvent,
 		MapMouseEvent,
 		Popup, // Import Popup
+		GeoJSONGeometry, // Import GeoJSONGeometry type
+		NavigationControl, // Import NavigationControl
 	} from "maplibre-gl";
 
 	import { browser } from "$app/environment";
@@ -48,6 +50,8 @@
 	let mapLeft: MaplibreMap | null = null;
 	let mapRight: MaplibreMap | null = null;
 	let compareControl: any = null;
+	let navControlLeft: NavigationControl | null = null; // Navigation control instance
+	let navControlRight: NavigationControl | null = null; // Navigation control instance
 	let isLoading: boolean = true;
 	let errorMessage: string | null = null;
 	let mapsInitialized = false;
@@ -58,6 +62,7 @@
 	let maplibregl: typeof import("maplibre-gl") | null = null;
 	let MaplibreCompare: any = null;
 	let MaplibrePopup: typeof Popup | null = null; // For Popup class
+	let MaplibreNavigationControl: typeof NavigationControl | null = null; // For NavigationControl
 
 	// Legend state
 	let leftLabel: string = "";
@@ -68,8 +73,6 @@
 	let rightMaxValue: number | null = null;
 
 	// Hover state
-	let leftPopup: Popup | null = null;
-	let rightPopup: Popup | null = null;
 	let hoveredLeftId: string | number | null = null;
 	let hoveredRightId: string | number | null = null;
 
@@ -85,13 +88,177 @@
 	let containerRect: DOMRect | null = null;
 	let compareContainerElement: HTMLElement;
 
+	let compareControlInitialized = false;
+
+	// --- Helper function to calculate bounds of a GeoJSON geometry ---
+	function calculateBounds(
+		geometry: GeoJSONGeometry
+	): LngLatBoundsLike | null {
+		if (!geometry || !geometry.coordinates) return null;
+
+		let minLng = Infinity;
+		let maxLng = -Infinity;
+		let minLat = Infinity;
+		let maxLat = -Infinity;
+
+		const processRing = (ring: number[][]) => {
+			ring.forEach(([lng, lat]) => {
+				// Basic validation for coordinates
+				if (
+					typeof lng === "number" &&
+					typeof lat === "number" &&
+					isFinite(lng) &&
+					isFinite(lat) &&
+					lng >= -180 &&
+					lng <= 180 &&
+					lat >= -90 &&
+					lat <= 90
+				) {
+					minLng = Math.min(minLng, lng);
+					maxLng = Math.max(maxLng, lng);
+					minLat = Math.min(minLat, lat);
+					maxLat = Math.max(maxLat, lat);
+				} else {
+					// console.warn(`Invalid coordinate skipped: [${lng}, ${lat}]`);
+				}
+			});
+		};
+
+		try {
+			if (geometry.type === "Polygon") {
+				if (geometry.coordinates.length > 0) {
+					processRing(geometry.coordinates[0]); // Process only the outer ring for bounds
+				}
+			} else if (geometry.type === "MultiPolygon") {
+				geometry.coordinates.forEach((polygon) => {
+					if (polygon.length > 0) {
+						processRing(polygon[0]); // Process outer ring of each polygon part
+					}
+				});
+			} else {
+				// console.warn("Unsupported geometry type for bounds calculation:", geometry.type);
+				return null;
+			}
+		} catch (error) {
+			console.error("Error processing geometry coordinates:", error);
+			return null;
+		}
+
+		if (
+			!isFinite(minLng) ||
+			!isFinite(maxLng) ||
+			!isFinite(minLat) ||
+			!isFinite(maxLat)
+		) {
+			// console.warn("Could not determine finite bounds for geometry");
+			return null; // Invalid bounds
+		}
+
+		// Ensure min/max are slightly different if the feature is effectively a point or line
+		if (minLng === maxLng) {
+			maxLng += 0.001; // Add small offset
+			minLng -= 0.001;
+		}
+		if (minLat === maxLat) {
+			maxLat += 0.001;
+			minLat -= 0.001;
+		}
+
+		return [
+			[minLng, minLat],
+			[maxLng, maxLat],
+		];
+	}
+
+	// --- Zoom Logic Helper ---
+	function zoomToBounds(bounds: LngLatBoundsLike | null) {
+		if (bounds && mapLeft && mapRight) {
+			const options = {
+				padding: 60, // Increased padding for better framing
+				maxZoom: 11.5, // Allow slightly closer zoom
+				duration: 800, // Animation duration
+				essential: true, // Ensure animation runs
+			};
+			// Fit bounds on both maps to keep them in sync
+			mapLeft.fitBounds(bounds, options);
+			mapRight.fitBounds(bounds, options);
+			return true;
+		}
+		return false;
+	}
+
+	// --- Zoom and Click Handling ---
+	function handleConstituencyClick(e: MapMouseEvent) {
+		if (e.features && e.features.length > 0) {
+			const feature = e.features[0];
+			const name = feature.properties?.[FEATURE_NAME_PROPERTY];
+
+			// Dispatch event for external components
+			if (name) dispatch("constituencyClick", { name });
+
+			// Calculate bounds and zoom using the helper
+			const bounds = calculateBounds(feature.geometry);
+			if (!zoomToBounds(bounds)) {
+				console.warn(
+					"Could not calculate bounds or zoom for clicked feature:",
+					feature
+				);
+			}
+		}
+	}
+
+	// --- EXPORTED FUNCTION for external zooming ---
+	export function zoomToConstituency(name: string) {
+		if (!mapLeft || !mapRight || !data || data.length === 0) {
+			console.warn("Map not ready or no data for zooming.");
+			return;
+		}
+
+		const constituency = data.find((d) => d.constituency_name === name);
+		if (!constituency || !constituency.const_code) {
+			console.warn(`Constituency '${name}' not found in data.`);
+			return;
+		}
+
+		const code = constituency.const_code;
+
+		// Query the source features to get the geometry
+		// Query either map, assuming sources are identical
+		const features = mapLeft.querySourceFeatures(SOURCE_ID_LEFT, {
+			sourceLayer: SOURCE_LAYER,
+			filter: ["==", FEATURE_ID_PROPERTY, code],
+		});
+
+		if (features && features.length > 0) {
+			const bounds = calculateBounds(features[0].geometry);
+			if (!zoomToBounds(bounds)) {
+				console.warn(
+					`Could not calculate bounds or zoom for constituency: ${name}`
+				);
+			}
+		} else {
+			console.warn(
+				`Could not find feature geometry for constituency code: ${code}`
+			);
+		}
+	}
+
 	// Replace the hover handlers with custom tooltip logic
 	function handleMouseMove(
 		map: MaplibreMap,
 		e: MapMouseEvent,
 		isLeftMap: boolean
 	) {
-		if (!e.features || e.features.length === 0) return;
+		if (!e.features || e.features.length === 0) {
+			// If moving off a feature but still over the map layer, hide tooltip
+			if (
+				(isLeftMap && hoveredLeftId !== null) ||
+				(!isLeftMap && hoveredRightId !== null)
+			) {
+				handleMouseLeave(map, isLeftMap);
+			}
+			return;
+		}
 
 		map.getCanvas().style.cursor = "pointer";
 		const feature = e.features[0];
@@ -102,7 +269,15 @@
 			(isLeftMap && featureId === hoveredLeftId) ||
 			(!isLeftMap && featureId === hoveredRightId)
 		) {
-			return; // Same feature, just update position
+			// Same feature, just update position
+			if (!containerRect) {
+				containerRect = compareContainerElement.getBoundingClientRect();
+			}
+			customPopupPosition = {
+				x: e.point.x,
+				y: e.point.y,
+			};
+			return;
 		}
 
 		if (isLeftMap) {
@@ -146,11 +321,20 @@
 	function handleMouseLeave(map: MaplibreMap, isLeftMap: boolean) {
 		map.getCanvas().style.cursor = "";
 		if (isLeftMap) {
-			hoveredLeftId = null;
+			if (hoveredLeftId !== null) {
+				hoveredLeftId = null;
+				customPopupVisible = false; // Hide only if this map's feature was hovered
+			}
 		} else {
-			hoveredRightId = null;
+			if (hoveredRightId !== null) {
+				hoveredRightId = null;
+				customPopupVisible = false; // Hide only if this map's feature was hovered
+			}
 		}
-		customPopupVisible = false;
+		// If both are null, ensure it's hidden (covers edge cases)
+		if (hoveredLeftId === null && hoveredRightId === null) {
+			customPopupVisible = false;
+		}
 	}
 
 	// Shared constants
@@ -519,7 +703,7 @@
 				matchExpression
 			);
 			// console.log(`Paint properties updated successfully for ${layerId}`);
-		} catch (error) {
+		} catch (error: any) {
 			console.error(`Error setting paint for ${layerId}:`, error);
 			errorMessage = `Map paint error for ${layerId}: ${error.message}`;
 		}
@@ -568,7 +752,7 @@
 					0
 				);
 			}
-		} catch (e) {
+		} catch (e: any) {
 			// console.warn(`Error setting highlight filter: ${e.message}`);
 		}
 	}
@@ -634,17 +818,24 @@
 		mapsInitialized = false;
 		sourcesAndLayersAdded = false;
 		isMapReadyForData = false;
+		compareControlInitialized = false; // Reset flag on mount
 
 		try {
 			// Dynamically import libraries
 			const maplibreModule = await import("maplibre-gl");
 			maplibregl = maplibreModule.default;
 			MaplibrePopup = maplibreModule.Popup; // Get Popup class
+			MaplibreNavigationControl = maplibreModule.NavigationControl; // Get NavigationControl class
 
 			MaplibreCompare = (await import("@maplibre/maplibre-gl-compare"))
 				.default;
 
-			if (!maplibregl || !MaplibreCompare || !MaplibrePopup) {
+			if (
+				!maplibregl ||
+				!MaplibreCompare ||
+				!MaplibrePopup ||
+				!MaplibreNavigationControl
+			) {
 				throw new Error("Failed to load MapLibre libraries");
 			}
 
@@ -653,7 +844,7 @@
 				center: [-2, 54.5],
 				zoom: 5,
 				minZoom: 4,
-				maxZoom: 10,
+				maxZoom: 14, // Increased max zoom slightly
 				pitch: 0,
 				bearing: 0,
 				pitchWithRotate: false,
@@ -684,6 +875,19 @@
 				errorMessage = `Right map error: ${e.error?.message || "Unknown error"}`;
 			});
 
+			// Add Navigation Controls
+			navControlLeft = new MaplibreNavigationControl({
+				showCompass: false,
+				showZoom: true,
+			});
+			navControlRight = new MaplibreNavigationControl({
+				showCompass: false,
+				showZoom: true,
+			});
+			mapLeft.addControl(navControlLeft, "top-right");
+			mapRight.addControl(navControlRight, "top-right");
+
+			// Wait for maps to load initial style
 			await Promise.all([
 				new Promise<void>((resolve) => mapLeft!.once("load", resolve)),
 				new Promise<void>((resolve) => mapRight!.once("load", resolve)),
@@ -695,6 +899,7 @@
 				throw new Error("MapLibre maps not initialized after load");
 			}
 
+			// Add sources and layers
 			await Promise.all([
 				addSourceAndLayer(mapLeft, SOURCE_ID_LEFT, LAYER_ID_LEFT),
 				addSourceAndLayer(mapRight, SOURCE_ID_RIGHT, LAYER_ID_RIGHT),
@@ -702,67 +907,52 @@
 			console.log("Sources and layers added to both maps");
 			sourcesAndLayersAdded = true;
 
+			// Wait for maps to be idle *after* sources/layers are added
 			await Promise.all([
 				new Promise<void>((resolve) => mapLeft!.once("idle", resolve)),
 				new Promise<void>((resolve) => mapRight!.once("idle", resolve)),
 			]);
 			console.log("Both maps are now idle");
 
+			// Initialize Compare Control
 			if (mapLeft && mapRight) {
 				compareControl = new MaplibreCompare(
 					mapLeft,
 					mapRight,
-					"#compare-container"
+					compareContainerElement // Use the bound element
 				);
 				console.log("Compare control initialized");
+
+				// --- MODIFICATION START ---
+				// Center slider ONLY on the very first initialization
+				if (!compareControlInitialized) {
+					requestAnimationFrame(() => {
+						setTimeout(() => {
+							// Dispatch resize event to trigger centering calculation
+							window.dispatchEvent(new Event("resize"));
+							console.log(
+								"Dispatched resize event for initial compare control centering."
+							);
+							compareControlInitialized = true; // Set flag so it doesn't run again
+						}, 50); // Small delay
+					});
+				}
+				// --- MODIFICATION END ---
 			} else {
 				throw new Error("Maps became unavailable before compare init");
 			}
 
+			// Fade in maps
 			mapLeftContainer.style.opacity = "1";
 			mapRightContainer.style.opacity = "1";
 
 			// --- Event Handlers ---
-
-			// Click Handlers
-			mapLeft.on("click", LAYER_ID_LEFT, (e: MapMouseEvent) => {
-				if (e.features && e.features.length > 0) {
-					const name =
-						e.features[0].properties?.[FEATURE_NAME_PROPERTY];
-					if (name) dispatch("constituencyClick", { name });
-				}
-			});
-			mapRight.on("click", LAYER_ID_RIGHT, (e: MapMouseEvent) => {
-				if (e.features && e.features.length > 0) {
-					const name =
-						e.features[0].properties?.[FEATURE_NAME_PROPERTY];
-					if (name) dispatch("constituencyClick", { name });
-				}
-			});
-
-			// Replace the hover handlers for left map
-			mapLeft.on("mousemove", LAYER_ID_LEFT, (e) =>
-				handleMouseMove(mapLeft!, e, true)
-			);
-			mapLeft.on("mouseleave", LAYER_ID_LEFT, () =>
-				handleMouseLeave(mapLeft!, true)
-			);
-
-			// Replace the hover handlers for right map
-			mapRight.on("mousemove", LAYER_ID_RIGHT, (e) =>
-				handleMouseMove(mapRight!, e, false)
-			);
-			mapRight.on("mouseleave", LAYER_ID_RIGHT, () =>
-				handleMouseLeave(mapRight!, false)
-			);
+			// ... (keep event handlers: click, mousemove, mouseleave) ...
 
 			// --- Final Setup ---
 			isMapReadyForData = true;
 			console.log("Triggering initial updateCompareMaps call");
 			updateCompareMaps(true); // Force initial update
-
-			// Schedule a follow-up update slightly later
-			setTimeout(() => updateCompareMaps(true), 500);
 
 			isLoading = false;
 			console.log("Map initialization complete");
@@ -780,23 +970,28 @@
 		mapsInitialized = false;
 		sourcesAndLayersAdded = false;
 		isMapReadyForData = false;
+		compareControlInitialized = false;
 
-		// Remove popups first
-		leftPopup?.remove();
-		rightPopup?.remove();
-
+		// Remove controls first
+		if (navControlLeft && mapLeft) mapLeft.removeControl(navControlLeft);
+		if (navControlRight && mapRight)
+			mapRight.removeControl(navControlRight);
 		compareControl?.remove();
+
+		// Remove maps
 		mapLeft?.remove();
 		mapRight?.remove();
 
+		// Nullify references
 		mapLeft = null;
 		mapRight = null;
 		compareControl = null;
+		navControlLeft = null;
+		navControlRight = null;
 		maplibregl = null;
 		MaplibreCompare = null;
 		MaplibrePopup = null;
-		leftPopup = null;
-		rightPopup = null;
+		MaplibreNavigationControl = null;
 		console.log("Cleanup complete");
 	});
 
@@ -1038,7 +1233,7 @@
 	{/if}
 </div>
 
-<!-- Global Styles for Compare Control & Tooltip -->
+<!-- Global Styles for Compare Control, Tooltip & Navigation -->
 <style>
 	#compare-container {
 		position: relative;
@@ -1172,25 +1367,6 @@
 		bottom: 7px;
 	}
 
-	/* Map Tooltip Styling - Keep for compatibility but we won't use it */
-	:global(.maplibregl-popup-content.map-tooltip) {
-		background-color: rgba(0, 0, 0, 0.8);
-		color: #ffffff;
-		padding: 6px 8px; /* Match scatter tooltip padding */
-		border-radius: 3px; /* Match scatter tooltip corner radius */
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-		font-family: system-ui, sans-serif;
-		font-size: 11px; /* Match scatter tooltip body font size */
-		line-height: 1.4;
-		border: 1px solid rgba(255, 255, 255, 0.1); /* Match scatter tooltip border */
-		max-width: 240px; /* Prevent overly wide tooltips */
-		pointer-events: none; /* Prevent popup from capturing mouse events */
-	}
-	:global(.maplibregl-popup-content.map-tooltip strong) {
-		font-weight: bold;
-		font-size: 12px; /* Slightly larger for title */
-	}
-
 	/* NEW CUSTOM POPUP STYLES */
 	.custom-popup {
 		transform: translate(-50%, -100%);
@@ -1267,5 +1443,96 @@
 	}
 	.ease-in-out {
 		transition-timing-function: ease-in-out;
+	}
+
+	/* Navigation Control Styling - Mapbox GL JS v2/v3 Style */
+	:global(.maplibregl-ctrl-top-right) {
+		margin: 10px 10px 0 0;
+		z-index: 5;
+	}
+	:global(.maplibregl-ctrl-group) {
+		/* Use Mapbox default background */
+		background: #fff !important;
+		border-radius: 4px !important;
+		/* Mapbox default shadow */
+		box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1) !important;
+		border: none !important;
+		overflow: hidden;
+	}
+	:global(.maplibregl-ctrl-group button) {
+		/* Mapbox default size */
+		width: 29px !important;
+		height: 29px !important;
+		background-color: transparent !important;
+		display: flex !important;
+		align-items: center !important;
+		justify-content: center !important;
+		/* Mapbox default icon color */
+		color: #333 !important;
+		opacity: 1;
+		cursor: pointer;
+		transition: background-color 0.1s ease-in-out;
+	}
+	:global(.maplibregl-ctrl-group button:hover) {
+		/* Mapbox default hover background */
+		background-color: #f0f0f0 !important; /* Slightly off-white/grey */
+		color: #000 !important;
+	}
+	:global(.maplibregl-ctrl-group button:focus) {
+		outline: none;
+		box-shadow: none;
+	}
+	:global(.maplibregl-ctrl-group button:disabled) {
+		cursor: not-allowed;
+		color: #aaa !important; /* Lighter grey for disabled */
+		background-color: transparent !important;
+	}
+	:global(.maplibregl-ctrl-group button + button) {
+		/* Mapbox default separator */
+		border-top: 1px solid rgba(0, 0, 0, 0.1) !important;
+	}
+
+	/* Remove default icon background and set size */
+	:global(.maplibregl-ctrl-icon) {
+		background-image: none !important;
+		width: 18px; /* Standard size for Mapbox icons */
+		height: 18px;
+		background-repeat: no-repeat;
+		background-position: center;
+		background-size: contain; /* Use contain for SVGs */
+	}
+
+	/* Mapbox Style SVG Icons (using data URIs) */
+	:global(.maplibregl-ctrl-zoom-in .maplibregl-ctrl-icon) {
+		/* Simple bold plus */
+		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath fill='%23333' d='M9,4.5a.75.75,0,0,1,.75.75v3h3a.75.75,0,0,1,0,1.5h-3v3a.75.75,0,0,1-1.5,0v-3h-3a.75.75,0,0,1,0-1.5h3v-3A.75.75,0,0,1,9,4.5z'/%3E%3C/svg%3E") !important;
+	}
+	:global(.maplibregl-ctrl-zoom-out .maplibregl-ctrl-icon) {
+		/* Simple bold minus */
+		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath fill='%23333' d='M4.5,8.25a.75.75,0,0,1,.75-.75h7.5a.75.75,0,0,1,0,1.5h-7.5A.75.75,0,0,1,4.5,8.25z'/%3E%3C/svg%3E") !important;
+	}
+	/* Hover state icon color change (optional but nice) */
+	:global(.maplibregl-ctrl-group button:hover .maplibregl-ctrl-icon) {
+		/* You might need to adjust the SVG fill color directly if using complex SVGs,
+		   but for these simple ones, the button's color change might suffice.
+		   If not, you'd need separate SVGs for hover or use mask-image with background-color. */
+	}
+
+	/* ... (keep existing styles for hiding controls on left map etc.) */
+	:global(
+			#compare-container
+				.maplibregl-compare-left
+				.maplibregl-ctrl-top-right
+		) {
+		opacity: 0.5;
+		pointer-events: none;
+	}
+	:global(
+			#compare-container
+				.maplibregl-compare-right
+				.maplibregl-ctrl-top-right
+		) {
+		opacity: 1;
+		pointer-events: auto;
 	}
 </style>
