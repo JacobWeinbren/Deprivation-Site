@@ -24,32 +24,34 @@ export const metrics: MetricOption[] = [
 		label: "SEISA Deprivation Proportion",
 		group: "Deprivation",
 	},
-	{
-		value: "census_DeprivedAny",
-		label: "Census: Households Deprived (Any Dimension)",
-		group: "Deprivation",
-	},
-	{
-		value: "census_Deprived1",
-		label: "Census: Households Deprived (1 Dim)",
-		group: "Deprivation",
-	},
-	{
-		value: "census_Deprived2",
-		label: "Census: Households Deprived (2 Dims)",
-		group: "Deprivation",
-	},
-	{
-		value: "census_Deprived3",
-		label: "Census: Households Deprived (3 Dims)",
-		group: "Deprivation",
-	},
-	{
-		value: "census_Deprived4",
-		label: "Census: Households Deprived (4 Dims)",
-		group: "Deprivation",
-	},
 
+	// *** UPDATED CENSUS DEPRIVATION METRICS ***
+	{
+		value: "census_DeprivedAny_pct",
+		label: "Census: Households Deprived (Any Dim %)",
+		group: "Deprivation",
+	},
+	{
+		value: "census_Deprived1_pct",
+		label: "Census: Households Deprived - 1 Dim (%)",
+		group: "Deprivation",
+	},
+	{
+		value: "census_Deprived2_pct",
+		label: "Census: Households Deprived - 2 Dim (%)",
+		group: "Deprivation",
+	},
+	{
+		value: "census_Deprived3_pct",
+		label: "Census: Households Deprived - 3 Dim (%)",
+		group: "Deprivation",
+	},
+	{
+		value: "census_Deprived4_pct",
+		label: "Census: Households Deprived - 4 Dim (%)",
+		group: "Deprivation",
+	},
+	// *** END UPDATED CENSUS DEPRIVATION METRICS ***
 	// === Group: Economic - Importance #2 ===
 	{
 		value: "child_poverty_percentage_22_23",
@@ -86,7 +88,6 @@ export const metrics: MetricOption[] = [
 		label: "Census: Households w/ No Adults Employed",
 		group: "Economic Activity",
 	},
-
 	// === Group: Census: Demographics (Age & Core) - Importance #3 ===
 	{
 		value: "census_PopulationDensity",
@@ -128,7 +129,6 @@ export const metrics: MetricOption[] = [
 		label: "Census: Communal Est. Residents",
 		group: "Census: Demographics (Core)",
 	},
-
 	// === Group: Census: Socioeconomic (Occupation, Health, Education) - Importance #4 ===
 	{
 		value: "census_NSSECManagerialProfessional",
@@ -185,7 +185,6 @@ export const metrics: MetricOption[] = [
 		label: "Census: Qualifications Level 4+",
 		group: "Census: Socioeconomic (Education)",
 	},
-
 	// === Group: Housing & Households - Importance #5 ===
 	{
 		value: "census_HouseOwns",
@@ -227,7 +226,6 @@ export const metrics: MetricOption[] = [
 		label: "Census: Households with 2+ Cars",
 		group: "Housing & Households (Transport)",
 	},
-
 	// === Group: Census: Ethnicity - Importance #6 ===
 	{
 		value: "census_EthnicityWhite",
@@ -259,7 +257,6 @@ export const metrics: MetricOption[] = [
 		label: "Census: Ethnicity Other",
 		group: "Census: Ethnicity",
 	},
-
 	// === Group: Census: Birthplace & Passports - Importance #7 ===
 	{
 		value: "census_BornUK",
@@ -296,7 +293,6 @@ export const metrics: MetricOption[] = [
 		label: "Census: No Passport Held",
 		group: "Census: Birthplace & Passports",
 	},
-
 	// === Group: Census: Religion - Importance #8 ===
 	{
 		value: "census_Christian",
@@ -338,7 +334,6 @@ export const metrics: MetricOption[] = [
 		label: "Census: Religion Other / Not Stated",
 		group: "Census: Religion",
 	},
-
 	// === Group: Census: Industry - Importance #9 ===
 	{
 		value: "census_IndustrySocialWork",

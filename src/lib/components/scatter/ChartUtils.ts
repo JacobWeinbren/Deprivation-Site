@@ -6,21 +6,34 @@ export interface ResponsiveFontSizes {
 	tooltipBodySize: number;
 }
 
+const DEFAULT_FONT_SIZES: ResponsiveFontSizes = {
+	titleSize: 16,
+	axisTitleSize: 12,
+	tickSize: 10,
+	tooltipTitleSize: 13,
+	tooltipBodySize: 11,
+};
+const SMALL_FONT_SIZES: ResponsiveFontSizes = {
+	titleSize: 14,
+	axisTitleSize: 11,
+	tickSize: 9,
+	tooltipTitleSize: 11,
+	tooltipBodySize: 10,
+};
+
 /**
- * Calculate appropriate font sizes based on container width
+ * Calculate appropriate font sizes based on container width.
+ * GUARANTEES to return a valid ResponsiveFontSizes object.
  */
 export function getResponsiveFontSizes(
-	width: number,
+	width: number | null | undefined,
 	smallBreakpoint = 640
 ): ResponsiveFontSizes {
+	if (typeof width !== "number" || !isFinite(width) || width <= 0) {
+		return { ...DEFAULT_FONT_SIZES }; // Return a copy
+	}
 	const isSmall = width < smallBreakpoint;
-	return {
-		titleSize: isSmall ? 14 : 16,
-		axisTitleSize: isSmall ? 11 : 12,
-		tickSize: isSmall ? 9 : 10,
-		tooltipTitleSize: isSmall ? 11 : 13,
-		tooltipBodySize: isSmall ? 10 : 11,
-	};
+	return isSmall ? { ...SMALL_FONT_SIZES } : { ...DEFAULT_FONT_SIZES }; // Return copies
 }
 
 /**
@@ -30,10 +43,7 @@ export function formatLegendLabel(value: number | null, label: string): string {
 	if (value === null || value === undefined) return "N/A";
 	const numValue = Number(value);
 	if (isNaN(numValue)) return "N/A";
-
-	// Use the provided label for context
 	if (label.includes("(%)") || label.includes("Voteshare")) {
-		// Handle potential 0-1 range if label doesn't explicitly have % but implies it
 		if (numValue >= 0 && numValue <= 1 && !label.includes("%")) {
 			return `${(numValue * 100).toFixed(1)}%`;
 		}

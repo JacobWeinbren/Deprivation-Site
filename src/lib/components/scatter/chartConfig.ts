@@ -5,7 +5,7 @@ export { parties, partyColors } from "./partyConfig";
 
 // --- Utility function for grouped metrics ---
 import type { MetricOption } from "./types";
-import { metrics } from "./metricConfig";
+import { metrics } from "./metricConfig"; // Import metrics from its own file
 
 export function getGroupedMetrics(
 	metricList: MetricOption[]
@@ -40,4 +40,5 @@ export function getGroupedMetrics(
 	return orderedMap;
 }
 
+// Generate grouped metrics using the imported metrics array
 export const groupedMetrics = getGroupedMetrics(metrics);

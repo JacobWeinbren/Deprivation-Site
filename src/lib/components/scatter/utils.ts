@@ -2,25 +2,17 @@
  * Retrieves a numeric value from a data object safely
  */
 export function getNumericValue(data: any, key: string): number | null {
-	if (!data || !key) return null;
-
-	// Handle non-existent property
-	if (!(key in data)) return null;
-
+	if (!data || !key || !(key in data)) return null;
 	const val = data[key];
-
-	// Handle null/undefined
-	if (val === null || val === undefined) return null;
-
-	// Handle already numeric values
+	if (val === null || val === undefined || val === "") return null; // Also treat empty string as null
 	if (typeof val === "number") return isNaN(val) ? null : val;
-
-	// Handle string values by converting to number
 	if (typeof val === "string") {
-		const parsed = parseFloat(val);
+		const cleanedVal = val.replace(/,/g, "").trim(); // Remove commas before parsing
+		if (cleanedVal === "") return null;
+		const parsed = parseFloat(cleanedVal);
 		return isNaN(parsed) ? null : parsed;
 	}
-
+	// console.warn(`Unexpected type for key ${key}: ${typeof val}`);
 	return null;
 }
 
@@ -32,16 +24,12 @@ export function debounce<T extends (...args: any[]) => any>(
 	wait: number = 300
 ): (...args: Parameters<T>) => void {
 	let timeout: ReturnType<typeof setTimeout> | null = null;
-
 	return function (...args: Parameters<T>): void {
 		const later = () => {
 			timeout = null;
 			func(...args);
 		};
-
-		if (timeout !== null) {
-			clearTimeout(timeout);
-		}
+		if (timeout !== null) clearTimeout(timeout);
 		timeout = setTimeout(later, wait);
 	};
 }

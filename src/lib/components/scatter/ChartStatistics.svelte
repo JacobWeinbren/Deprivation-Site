@@ -5,7 +5,7 @@
 	export let isLoading: boolean = false;
 
 	function getCorrelationStrength(r: number | null): string {
-		if (r === null) return "text-gray-700";
+		if (r === null || isNaN(r)) return "text-gray-600"; // Handle NaN
 		const absR = Math.abs(r);
 		if (absR >= 0.7) return "text-emerald-700"; // Strong
 		if (absR >= 0.4) return "text-sky-700"; // Moderate
@@ -14,7 +14,7 @@
 	}
 
 	function getRSquaredStrength(r2: number | null): string {
-		if (r2 === null) return "text-gray-700";
+		if (r2 === null || isNaN(r2)) return "text-gray-600"; // Handle NaN
 		if (r2 >= 0.5) return "text-emerald-700"; // Strong
 		if (r2 >= 0.16) return "text-sky-700"; // Moderate
 		if (r2 >= 0.01) return "text-amber-700"; // Weak

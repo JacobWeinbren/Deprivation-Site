@@ -12,7 +12,5 @@
 			<span class="font-medium text-gray-600">Notes:</span>
 			{notes}
 		</p>
-		<!-- Add more notes if needed -->
-		<!-- <p>Another note here.</p> -->
 	</div>
 {/if}
