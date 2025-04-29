@@ -369,6 +369,11 @@ export const metrics: MetricOption[] = [
 		group: "Politics",
 	},
 	{
+		value: "brexit_leave_share",
+		label: "Leave Share 2016 (%)",
+		group: "Politics",
+	},
+	{
 		value: "Con19",
 		label: "Conservative Voteshare 2019 (%)",
 		group: "Politics",
@@ -403,7 +408,7 @@ export const metrics: MetricOption[] = [
 // --- Party/Voteshare Configuration ---
 export const parties: PartyOption[] = [
 	{ value: "swing_con_lab_19_24", label: "Swing '19-'24 (Con-Lab, %)" },
-	{ value: "brexit_leave_share", label: "Est. Leave Share 2016 (%)" },
+	{ value: "brexit_leave_share", label: "Leave Share 2016 (%)" },
 	{ value: "con_voteshare", label: "Conservative Voteshare 2024 (%)" },
 	{ value: "lab_voteshare", label: "Labour Voteshare 2024 (%)" },
 	{ value: "ld_voteshare", label: "Lib Dem Voteshare 2024 (%)" },
