@@ -1,7 +1,7 @@
 <script lang="ts">
 	export let title = "British Constituency Explorer";
 	export let description =
-		"Compare 2024 General Election results with socio-economic data. Select a party/swing and a metric below, then explore the scatter plot or compare maps. Click a point or area to highlight and zoom.";
+		"Compare the 2024 General Election results with socio-economic data. Select a political result and a metric below, then explore the scatter plot or compare maps. Click a point or area to highlight.";
 </script>
 
 <div class="mb-8 text-center sm:mb-10">
