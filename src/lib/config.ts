@@ -441,7 +441,7 @@ export const metrics: MetricOption[] = [
 	},
 	{
 		// Assuming Brexit Party -> Reform UK for 2024
-		value: "Reform24",
+		value: "RUK24",
 		label: "Reform UK Voteshare 2024 (%)",
 		group: "2024 Election",
 	},
