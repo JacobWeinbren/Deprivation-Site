@@ -101,7 +101,7 @@ export function zoomToBounds(
 
 	const options = {
 		padding: { top: 60, bottom: 60, left: 60, right: 60 } as PointLike, // More specific padding
-		maxZoom: 11.5, // Limit max zoom level
+		maxZoom: 10,
 		duration: 800, // Animation duration
 		essential: true, // Consider this animation essential
 	};

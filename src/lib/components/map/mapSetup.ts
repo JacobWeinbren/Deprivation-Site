@@ -33,7 +33,7 @@ export function initializeMapInstance(
 				center: UK_DEFAULT_CENTER as LngLatLike,
 				zoom: UK_DEFAULT_ZOOM,
 				minZoom: 4,
-				maxZoom: 14,
+				maxZoom: 10,
 				pitch: 0,
 				bearing: 0,
 				pitchWithRotate: false,

@@ -106,7 +106,7 @@ export async function addOrUpdateSourceAndLayers(
 					tiles: [MAP_TILE_URL],
 					promoteId: FEATURE_ID_PROPERTY,
 					minzoom: 0,
-					maxzoom: 14,
+					maxzoom: 17,
 				});
 				sourceListener = (e: MapDataEvent) => {
 					if (
