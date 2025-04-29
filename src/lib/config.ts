@@ -31,6 +31,11 @@ export const metrics: MetricOption[] = [
 		group: "Deprivation",
 	},
 	{
+		value: "crime_score",
+		label: "Crime Score (IMD)",
+		group: "Deprivation",
+	},
+	{
 		value: "seisa_2021_proportion",
 		label: "SEISA Deprivation Proportion (%)",
 		group: "Deprivation",

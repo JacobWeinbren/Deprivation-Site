@@ -15,8 +15,12 @@
 
 	// Import config and types
 	import { metrics, partyGroups } from "$lib/config";
-	import type { ConstituencyData } from "$lib/types";
+	import type { ConstituencyData, PartyOption } from "$lib/types";
 	import type { PageData } from "./$types";
+
+	const allPartyOptions: PartyOption[] = partyGroups.flatMap(
+		(group) => group.options
+	);
 
 	// Data loaded from +page.server.ts
 	export let data: PageData; // This prop holds { chartData, error }
@@ -176,6 +180,7 @@
 						{selectedMetric}
 						{highlightedConstituency}
 						{metrics}
+						parties={allPartyOptions}
 						on:constituencyClick={handleChildClick}
 					/>
 				</div>
@@ -197,6 +202,7 @@
 						{selectedMetric}
 						{highlightedConstituency}
 						{metrics}
+						parties={allPartyOptions}
 						on:constituencyClick={handleChildClick}
 					/>
 				</div>
