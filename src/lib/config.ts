@@ -475,7 +475,7 @@ export const partyGroups: PartyGroup[] = [
 			{ value: "Con24", label: "Conservative 2024 (%)" },
 			{ value: "Lab24", label: "Labour 2024 (%)" },
 			{ value: "LD24", label: "Lib Dem 2024 (%)" },
-			{ value: "R24", label: "Reform UK 2024 (%)" },
+			{ value: "RUK24", label: "Reform UK 2024 (%)" },
 			{ value: "Green24", label: "Green 2024 (%)" },
 			{ value: "Other24", label: "Other 2024 (%)" },
 			{ value: "Turnout24", label: "Turnout 2024 (%)" },
