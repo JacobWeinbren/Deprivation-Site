@@ -14,7 +14,7 @@ import type {
 } from "$lib/types";
 // *** Import hexToRgba ***
 import { getNumericValue, hexToRgba } from "$lib/utils";
-import { getResponsiveFontSizes, formatChartLabel } from "./chartUtils";
+import { getResponsiveFontSizes, formatChartLabel } from "./ChartUtils";
 import { metricQuintileColors, NO_DATA_COLOR } from "$lib/config";
 
 // ProcessChartData and generateChartConfig functions remain the same...
