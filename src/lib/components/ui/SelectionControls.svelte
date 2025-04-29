@@ -1,12 +1,14 @@
 <script lang="ts">
-	import type { MetricOption, PartyOption } from "$lib/types";
+	import type { MetricOption } from "$lib/types";
+	// Import the new structure and types from your config file
+	import { partyGroups, type PartyGroup } from "$lib/config"; // Adjust path as needed
 
 	export let selectedParty: string = "";
 	export let selectedMetric: string = "";
 	export let metrics: MetricOption[] = [];
-	export let parties: PartyOption[] = [];
+	// Remove the old 'parties' prop: export let parties: PartyOption[] = [];
 
-	// Prepare grouped metrics for the dropdown
+	// Prepare grouped metrics for the dropdown (This part remains the same)
 	$: groupedMetrics = (() => {
 		const groupMap = new Map<string, { value: string; label: string }[]>();
 		const groupOrder: string[] = [];
@@ -30,13 +32,13 @@
 </script>
 
 <div class="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
-	<!-- Party/Swing Selection -->
+	<!-- Party/Swing Selection (Updated) -->
 	<div>
 		<label
 			for="party-select"
 			class="mb-1.5 block text-xs font-medium text-gray-600"
 		>
-			Party / Swing / Left Map
+			Politics / Left Map
 		</label>
 		<div class="relative">
 			<select
@@ -44,8 +46,13 @@
 				bind:value={selectedParty}
 				class="block w-full appearance-none rounded-md border border-gray-300 bg-white py-2 pl-3 pr-8 text-sm shadow-sm transition duration-150 ease-in-out hover:border-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
 			>
-				{#each parties as party (party.value)}
-					<option value={party.value}>{party.label}</option>
+				<!-- Iterate through partyGroups -->
+				{#each partyGroups as groupInfo (groupInfo.groupName)}
+					<optgroup label={groupInfo.groupName}>
+						{#each groupInfo.options as party (party.value)}
+							<option value={party.value}>{party.label}</option>
+						{/each}
+					</optgroup>
 				{/each}
 			</select>
 			<div
@@ -68,7 +75,7 @@
 		</div>
 	</div>
 
-	<!-- Metric Selection -->
+	<!-- Metric Selection (Remains the same) -->
 	<div>
 		<label
 			for="metric-select"

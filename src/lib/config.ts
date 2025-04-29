@@ -1,7 +1,18 @@
-import type { MetricOption, PartyOption } from "./types";
+import type { MetricOption } from "./types"; // Assuming PartyOption might be removed or redefined
+
+// Define types for the new grouped structure
+export interface PartyGroupOption {
+	value: string;
+	label: string;
+}
+
+export interface PartyGroup {
+	groupName: string;
+	options: PartyGroupOption[];
+}
 
 // --- Metrics Configuration ---
-// *** ENSURE THIS ARRAY CONTAINS ALL YOUR ORIGINAL METRICS ***
+// *** ENSURE 2019 POLITICAL METRICS ARE REMOVED FROM HERE ***
 export const metrics: MetricOption[] = [
 	// === Group: Deprivation (IMD/SEISA/Census) - Importance #1 ===
 	{
@@ -401,15 +412,39 @@ export const metrics: MetricOption[] = [
 ];
 
 // --- Party/Voteshare Configuration ---
-export const parties: PartyOption[] = [
-	{ value: "swing_con_lab_19_24", label: "Swing '19-'24 (Con-Lab, %)" },
-	{ value: "brexit_leave_share", label: "Leave Share 2016 (%)" },
-	{ value: "con_voteshare", label: "Conservative Voteshare 2024 (%)" },
-	{ value: "lab_voteshare", label: "Labour Voteshare 2024 (%)" },
-	{ value: "ld_voteshare", label: "Lib Dem Voteshare 2024 (%)" },
-	{ value: "ref_voteshare", label: "Reform UK Voteshare 2024 (%)" },
-	{ value: "green_voteshare", label: "Green Voteshare 2024 (%)" },
-	{ value: "oth_voteshare", label: "Other Voteshare 2024 (%)" },
+export const partyGroups: PartyGroup[] = [
+	{
+		groupName: "Swing & Brexit",
+		options: [
+			{
+				value: "swing_con_lab_19_24",
+				label: "Swing '19-'24 (Con-Lab, %)",
+			},
+			{ value: "brexit_leave_share", label: "Leave Share 2016 (%)" },
+		],
+	},
+	{
+		groupName: "2024 Voteshare",
+		options: [
+			{ value: "con_voteshare", label: "Conservative 2024 (%)" },
+			{ value: "lab_voteshare", label: "Labour 2024 (%)" },
+			{ value: "ld_voteshare", label: "Lib Dem 2024 (%)" },
+			{ value: "ref_voteshare", label: "Reform UK 2024 (%)" },
+			{ value: "green_voteshare", label: "Green 2024 (%)" },
+			{ value: "oth_voteshare", label: "Other 2024 (%)" },
+		],
+	},
+	{
+		groupName: "2019 Voteshare",
+		options: [
+			{ value: "Con19", label: "Conservative 2019 (%)" },
+			{ value: "Lab19", label: "Labour 2019 (%)" },
+			{ value: "LD19", label: "Lib Dem 2019 (%)" },
+			{ value: "Brexit19", label: "Brexit Party 2019 (%)" },
+			{ value: "Green19", label: "Green 2019 (%)" },
+			{ value: "Other19", label: "Other 2019 (%)" },
+		],
+	},
 ];
 
 // --- Color Palettes ---

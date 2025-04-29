@@ -14,7 +14,7 @@
 	import Footer from "$lib/components/ui/Footer.svelte";
 
 	// Import config and types
-	import { metrics, parties } from "$lib/config";
+	import { metrics, partyGroups } from "$lib/config";
 	import type { ConstituencyData } from "$lib/types";
 	import type { PageData } from "./$types";
 
@@ -129,7 +129,6 @@
 						bind:selectedParty
 						bind:selectedMetric
 						{metrics}
-						{parties}
 					/>
 				</div>
 				<div class="mt-2 md:mt-0">
@@ -177,7 +176,6 @@
 						{selectedMetric}
 						{highlightedConstituency}
 						{metrics}
-						{parties}
 						on:constituencyClick={handleChildClick}
 					/>
 				</div>
@@ -199,7 +197,6 @@
 						{selectedMetric}
 						{highlightedConstituency}
 						{metrics}
-						{parties}
 						on:constituencyClick={handleChildClick}
 					/>
 				</div>
