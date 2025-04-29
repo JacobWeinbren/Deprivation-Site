@@ -1,12 +1,12 @@
 // src/lib/components/scatter/chartLogic.ts
-
+// ... (imports remain the same) ...
 import type {
 	ChartConfiguration,
 	ChartOptions,
 	Point,
 	TooltipCallbacks,
 	FontSpec,
-	ChartJSChart,
+	ChartJSChart, // Keep renamed type if used elsewhere
 	ConstituencyData,
 	MetricOption,
 	PartyOption,
@@ -17,7 +17,7 @@ import { getNumericValue, hexToRgba } from "$lib/utils";
 import { getResponsiveFontSizes, formatChartLabel } from "./ChartUtils";
 import { metricQuintileColors, NO_DATA_COLOR } from "$lib/config";
 
-// ProcessChartData and generateChartConfig functions remain the same...
+// ... (processChartData remains the same) ...
 export interface ProcessedChartData {
 	plotPoints: (Point & { label: string; id: string })[];
 	statPoints: [number, number][];
@@ -50,16 +50,20 @@ export function processChartData(
 		if (isSwingMetricX) {
 			isValidXForPlot = xValueValid;
 		} else {
+			// Ensure non-swing X values are non-negative for plotting
 			isValidXForPlot = xValueValid && xVal >= 0;
 		}
 		let isValidYForPlot: boolean;
 		if (isSwingMetricY) {
 			isValidYForPlot = yValueValid;
 		} else {
+			// Ensure non-swing Y values are non-negative for plotting
 			isValidYForPlot = yValueValid && yVal >= 0;
 		}
 		if (isValidXForPlot && isValidYForPlot) {
 			plotPoints.push({ x: xVal!, y: yVal!, label: name, id: id });
+			// Only include valid numeric pairs for stats, regardless of >= 0 check
+			// (Stats can handle negative swing values)
 			if (xValueValid && yValueValid) {
 				statPoints.push([xVal!, yVal!]);
 			}
@@ -71,13 +75,10 @@ export function processChartData(
 	let rSquared: number | null = null;
 	let regressionLinePoints: Point[] = [];
 	const n = statPoints.length;
-	let xValuesForQuantiles: number[];
-	if (isSwingMetricX) {
-		xValuesForQuantiles = statPoints.map((p) => p[0]);
-	} else {
-		xValuesForQuantiles = statPoints.map((p) => p[0]).filter((x) => x > 0);
-	}
+	// Use all valid numeric x-values for quantiles, including negative swing
+	let xValuesForQuantiles: number[] = statPoints.map((p) => p[0]);
 	xValuesForQuantiles.sort((a, b) => a - b);
+
 	let metricQuantiles: number[] = [];
 	if (xValuesForQuantiles.length >= 5) {
 		metricQuantiles = [20, 40, 60, 80].map((p) =>
@@ -140,6 +141,7 @@ export function processChartData(
 		xValuesForQuantiles,
 	};
 }
+
 export function generateChartConfig(
 	processedData: ProcessedChartData,
 	props: {
@@ -166,41 +168,52 @@ export function generateChartConfig(
 		compact,
 		containerWidth,
 	} = props;
+
+	// --- Determine if axes represent swing metrics ---
+	const isSwingMetricX = selectedMetric === "swing_con_lab_19_24"; // <-- Added check for X-axis
 	const isSwingMetricY = selectedParty === "swing_con_lab_19_24";
+
 	const fontSizes = getResponsiveFontSizes(containerWidth);
 	const selectedPartyLabel =
 		parties.find((p) => p.value === selectedParty)?.label || selectedParty;
 	const selectedMetricLabel =
 		metrics.find((m) => m.value === selectedMetric)?.label ||
 		selectedMetric;
+
 	// --- Calculate INITIAL Point Colors (used by applyChartHighlight) ---
-	// Store the base hex color for each point before applying opacity
 	const baseHexColors = plotPoints.map((point) => {
 		const value = point.x;
-		const isSwingMetricX = selectedMetric === "swing_con_lab_19_24";
+		// Use the isSwingMetricX flag here for consistency
 		if (value === null || value === undefined) return NO_DATA_COLOR;
+		// Allow 0 for swing metric, but not others for coloring
 		if (!isSwingMetricX && value === 0) return NO_DATA_COLOR;
+
+		// Quantile coloring logic (remains the same, uses all valid xValuesForQuantiles)
 		if (metricQuantiles.length < 4 || xValuesForQuantiles.length < 5) {
 			if (
 				xValuesForQuantiles.length < 2 ||
 				xValuesForQuantiles[xValuesForQuantiles.length - 1] <=
 					xValuesForQuantiles[0]
 			) {
-				return metricQuintileColors[2];
+				// Handle edge case: single point or all points same value
+				return metricQuintileColors[2]; // Default to middle color
 			} else {
 				const min = xValuesForQuantiles[0];
 				const max = xValuesForQuantiles[xValuesForQuantiles.length - 1];
-				const ratio = Math.max(
-					0,
-					Math.min(1, (value - min) / (max - min))
-				);
-				const colorIndex = Math.max(
-					0,
-					Math.min(4, Math.floor(ratio * 5))
+				// Ensure max > min to avoid division by zero
+				const range = max - min;
+				if (range <= 0) return metricQuintileColors[2]; // Default if no range
+
+				const ratio = Math.max(0, Math.min(1, (value - min) / range));
+				// Use Math.min(4, ...) to prevent index out of bounds if ratio is exactly 1
+				const colorIndex = Math.min(
+					4,
+					Math.max(0, Math.floor(ratio * 5))
 				);
 				return metricQuintileColors[colorIndex];
 			}
 		} else {
+			// Quantile boundaries coloring
 			if (value < metricQuantiles[0]) return metricQuintileColors[0];
 			if (value < metricQuantiles[1]) return metricQuintileColors[1];
 			if (value < metricQuantiles[2]) return metricQuintileColors[2];
@@ -220,10 +233,8 @@ export function generateChartConfig(
 			label: "Constituencies",
 			data: plotPoints,
 			parsing: false,
-			// *** Use initial colors with base opacity ***
 			backgroundColor: initialBackgroundColors,
-			// Store base hex colors for reference in applyChartHighlight
-			_baseHexColors: baseHexColors,
+			_baseHexColors: baseHexColors, // Store base hex colors
 			borderColor: "transparent",
 			borderWidth: 0,
 			pointRadius: defaultPointSize,
@@ -319,6 +330,9 @@ export function generateChartConfig(
 			x: {
 				type: "linear",
 				position: "bottom",
+				// --- MODIFICATION HERE ---
+				min: !isSwingMetricX ? 0 : undefined,
+				// --- END MODIFICATION ---
 				title: {
 					display: true,
 					text: selectedMetricLabel,
@@ -343,7 +357,7 @@ export function generateChartConfig(
 			y: {
 				type: "linear",
 				position: "left",
-				beginAtZero: !isSwingMetricY,
+				min: !isSwingMetricY ? 0 : undefined,
 				title: {
 					display: true,
 					text: selectedPartyLabel,
@@ -384,10 +398,7 @@ export function generateChartConfig(
 	return { type: "scatter", data: { datasets }, options: options };
 }
 
-/**
- * Applies highlight styling (point size, border, opacity) to the chart dataset.
- * Modifies the dataset directly.
- */
+// ... (applyChartHighlight remains the same) ...
 export function applyChartHighlight(
 	dataset: any, // Use any temporarily as we added a custom prop
 	plotPoints: ProcessedChartData["plotPoints"],
