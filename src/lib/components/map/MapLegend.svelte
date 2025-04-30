@@ -138,7 +138,7 @@
 		<div
 			class="col-span-1 mt-1.5 text-center text-[10px] text-gray-400 sm:col-span-2"
 		>
-			Colors show quintiles (approx. 20% bands based on positive values).
+			Colours show quintiles (approx. 20% bands based on positive values).
 			Grey indicates no data or zero. Hover for details.
 		</div>
 	</div>
